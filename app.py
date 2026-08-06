@@ -124,6 +124,68 @@ def _build_workbook_ltd(d):
     return wb
 
 
+# ---- Build the 'SA Proposal' sheet his read_sa() reads (sole trader / self-assessment) ----
+def _fill_sa_sheet(ws, d):
+    _set(ws, "C5", d.get("prepared_by") or "Shabbir Rahman FCCA")
+    _set(ws, "C6", d.get("company") or d.get("contact") or "Client")
+    _set(ws, "C7", d.get("contact") or "there")
+    _set(ws, "C8", d.get("email") or "")
+    _set(ws, "C9", d.get("phone") or "")
+    _set(ws, "C10", d.get("date") or datetime.date.today().strftime("%d %B %Y"))
+    _set(ws, "C13", d.get("ctype") or "")
+    _set(ws, "C15", d.get("freq") or "Annually")
+    _set(ws, "J30", d.get("source") or "")
+    _set(ws, "J31", d.get("referrer") or "")
+    _set(ws, "B60", d.get("notes") or "")
+
+    # service lines - his read_sa reads 7 fixed rows (26-32); the platform's SA proposal is
+    # a package + optional extras, so map by service name into the right fixed row.
+    sa = d.get("services", {})
+    monthly = (d.get("freq") or "Annually").lower() == "monthly"
+    col = "E" if monthly else "D"   # E = monthly, D = annual
+    rowmap = {"sa_return": 26, "property": 27, "mtd": 28,
+              "book": 29, "vat": 30, "payroll": 31, "software": 32}
+    for key, row in rowmap.items():
+        v = _num(sa.get(key))
+        if v > 0:
+            _set(ws, "%s%d" % (col, row), v)
+
+    # totals: his read_sa reads annual D34/D36, monthly E34/E36
+    fee = _num(d.get("sub"))
+    if monthly:
+        _set(ws, "E34", fee); _set(ws, "E36", fee * 1.2)
+    else:
+        _set(ws, "D34", fee); _set(ws, "D36", fee * 1.2)
+    _set(ws, "H34", _num(d.get("discount_annual")))
+    _set(ws, "H35", _num(d.get("discount_monthly")))
+
+    # one-offs rows 40-47 (B desc, E price)
+    for i, o in enumerate(d.get("oneoffs", [])[:8]):
+        r = 40 + i
+        _set(ws, "B%d" % r, o.get("label") or "")
+        _set(ws, "E%d" % r, _num(o.get("amount")))
+    _set(ws, "E55", _num(d.get("osub")))
+    _set(ws, "E56", _num(d.get("ovat")))
+    _set(ws, "E57", _num(d.get("ogross")))
+
+    # registration block rows 49-54 (C=Required, E=fee): sa/paye/vat/cis_sub/cis_con/other
+    regs = d.get("registrations", {})
+    sarow = {"sa": 49, "paye": 50, "vat": 51, "cis_sub": 52, "cis_con": 53, "other": 54}
+    for key, row in sarow.items():
+        if regs.get(key):
+            _set(ws, "C%d" % row, "Required")
+            _set(ws, "E%d" % row, _num((regs.get(key) or {}).get("fee")))
+
+
+def _build_workbook_sa(d):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "SA Proposal"
+    _fill_sa_sheet(ws, d)
+    _fill_rate_card(wb, d.get("ratecard"))
+    return wb
+
+
 @app.route("/health")
 def health():
     return jsonify(ok=True, service="a2z-proposal-pdf")
@@ -153,7 +215,10 @@ def proposal():
             wb2 = GEN.safe_load_workbook(wb_path)
             GEN.build_partnership(wb2, out_path, ref=d.get("ref"))
         elif kind == "SA":
-            return jsonify(error="SA proposals are coming next - LTD/Partnership are live."), 400
+            wb = _build_workbook_sa(d)
+            wb.save(wb_path)
+            wb2 = GEN.safe_load_workbook(wb_path)
+            GEN.build_sa(wb2, out_path, ref=d.get("ref"))
         else:
             return jsonify(error="Unknown kind: %s" % kind), 400
     except Exception as e:
@@ -237,12 +302,17 @@ def _pdf_bytes_for(d):
     tmpdir = tempfile.mkdtemp()
     wb_path = os.path.join(tmpdir, "wb.xlsx")
     out_path = os.path.join(tmpdir, "proposal.pdf")
-    wb = _build_workbook_ltd(d)
-    if kind == "PARTNERSHIP":
-        wb.active.title = "Partnership Proposal"
+    if kind == "SA":
+        wb = _build_workbook_sa(d)
+    else:
+        wb = _build_workbook_ltd(d)
+        if kind == "PARTNERSHIP":
+            wb.active.title = "Partnership Proposal"
     wb.save(wb_path)
     wb2 = GEN.safe_load_workbook(wb_path)
-    if kind == "PARTNERSHIP":
+    if kind == "SA":
+        GEN.build_sa(wb2, out_path, ref=d.get("ref"))
+    elif kind == "PARTNERSHIP":
         GEN.build_partnership(wb2, out_path, ref=d.get("ref"))
     else:
         GEN.build_ltd(wb2, out_path, ref=d.get("ref"))
@@ -250,23 +320,156 @@ def _pdf_bytes_for(d):
         return f.read()
 
 
+def _enhanced_email(d, kind, scenario):
+    """His proposal email, reproduced verbatim for the unchanged parts, PLUS:
+    an itemised setup-cost breakdown, and one of three onboarding scenarios
+    (newco = we register / switcher = moving from another firm / existing =
+    has a business but no previous accountant). His a2z_proposals_fpdf.py is
+    NOT modified - this layers on top of the data his read_* returns."""
+    K = kind.upper()
+    gbp = GEN.gbp
+    num = GEN.num
+    FORMS = GEN.FORMS
+    name = (str(d.get("contact") or "there").strip()) or "there"
+    company = (str(d.get("company") or "your business").strip()) or "your business"
+    subject = "Your A2Z proposal for %s" % company
+    svc = [str(r[0]).strip() for r in d.get("lines", []) if str(r[0]).strip()]
+    regs = d.get("regs") or []
+    keys = {r.get("key") for r in regs}
+
+    L = ["Hi %s," % name, "",
+         ("Thank you for the opportunity to look after %s \u2014 it's a pleasure to put this "
+          "proposal together for you. I've attached the full proposal, and here's a quick summary." % company),
+         "", "What we'd take care of for you:"]
+    L += ["\u2022 %s" % x for x in (svc or ["the services we discussed"])]
+    L += [""]
+
+    # ---- fee line (his exact wording) ----
+    if K == "LTD":
+        L += ["Your fee would be %s + VAT a month \u2014 a single fixed amount, with no surprise bills along the way." % gbp(d.get("sub", 0))]
+        if (num(d.get("discount", 0)) or 0) > 0:
+            L += ["As an exceptional act of discretion, a goodwill discount of %s + VAT per month has been applied. Your fee above already reflects this." % gbp(d["discount"])]
+        nd = int(num(d.get("directors", 0)) or 0)
+        if nd == 1:
+            L += ["Each director's personal tax return (self-assessment) is \u00a3120 + VAT a year, billed separately."]
+        elif nd > 1:
+            L += ["Each director's personal tax return (self-assessment) is \u00a3120 + VAT a year, billed separately \u2014 for %d directors that comes to %s + VAT a year." % (nd, gbp(nd * 120))]
+    else:  # SA
+        m = num(d.get("monthly", 0)) or 0
+        a = num(d.get("annual", 0)) or 0
+        if m > 0:
+            L += ["Your fee would be %s + VAT a month \u2014 a single fixed amount, with no surprise bills along the way." % gbp(d["monthly"])]
+        elif a > 0:
+            L += ["Your fee would be %s + VAT a year \u2014 a single fixed amount, with no surprise bills along the way." % gbp(d["annual"])]
+        else:
+            L += ["Your fee is set out in the attached proposal."]
+    L += [""]
+
+    # ---- itemised setup breakdown ----
+    setup_items = []
+    setup_total = 0
+    reg_labels = set()
+    for r in regs:
+        lab = str(r.get("label") or "").strip().lower()
+        reg_labels.add(lab)
+        fee = num(r.get("fee")) or 0
+        if r.get("included") or fee <= 0:
+            setup_items.append("\u2022 %s \u2014 included" % r["label"])
+        else:
+            setup_items.append("\u2022 %s \u2014 %s + VAT" % (r["label"], gbp(fee)))
+            setup_total += fee
+    for o in d.get("oneoffs", []):
+        desc = str(o[0]).strip() if o and len(o) > 0 else ""
+        price = num(o[2]) if o and len(o) > 2 else 0
+        if not desc:
+            continue
+        dl = desc.lower()
+        # skip if this one-off is already shown as a registration (same or contained label)
+        if any(dl == rl or dl in rl or rl in dl for rl in reg_labels):
+            continue
+        if price and price > 0:
+            setup_items.append("\u2022 %s \u2014 %s + VAT" % (desc, gbp(price)))
+            setup_total += price
+        else:
+            setup_items.append("\u2022 %s \u2014 included" % desc)
+    osub = num(d.get("osub", 0)) or 0
+    if osub > setup_total:   # trust the workbook subtotal if it is higher
+        setup_total = osub
+    if setup_items:
+        L += ["To get you set up, here's the one-off work at the start:"]
+        L += setup_items
+        L += ["One-off setup: %s + VAT" % gbp(setup_total) if setup_total > 0 else "There's no charge for your setup \u2014 it's all included."]
+        L += [""]
+    elif osub > 0:
+        L += ["There's also a one-off setup of %s + VAT to get everything in place at the start." % gbp(osub), ""]
+
+    # ---- onboarding: one of three scenarios ----
+    primary_key = "company" if K == "LTD" else "sa"
+    primary_fee = 0
+    for r in regs:
+        if r.get("key") == primary_key:
+            primary_fee = num(r.get("fee")) or 0
+            break
+    onboard_name, onboard_url = FORMS[K]["onboard"]
+    reg_name, reg_url = FORMS[K]["reg"]
+    sc = (scenario or "").lower()
+    if sc not in ("newco", "switcher", "existing"):
+        sc = "newco" if primary_key in keys else "existing"   # infer if not supplied
+    thing = "company" if K == "LTD" else "business"
+
+    if sc == "newco":
+        if K == "LTD":
+            feebit = (" (the company formation fee is %s + VAT, charged once)" % gbp(primary_fee)) if primary_fee > 0 else ""
+            L += ["As we're forming %s for you, the first step is to complete our %s%s, which only takes a few minutes:" % (company, reg_name, feebit), reg_url]
+        else:
+            L += ["To get you registered, the first step is to complete our %s, which only takes a few minutes:" % reg_name, reg_url]
+    elif sc == "switcher":
+        L += ["You're moving to us from another accountant, so there's nothing for you to chase \u2014 just complete our %s and we'll write to your current accountant for professional clearance and handle the whole handover for you:" % onboard_name, onboard_url]
+    else:  # existing
+        if K == "LTD":
+            L += ["As your %s is already set up and you've not had an accountant before, getting started is simply completing our %s, which only takes a few minutes:" % (thing, onboard_name), onboard_url]
+        else:
+            L += ["As you're already trading and you've not had an accountant before, getting started is simply completing our %s, which only takes a few minutes:" % onboard_name, onboard_url]
+
+    # ---- extra registration links (non-primary), exactly as his build_email does ----
+    extra = []
+    seen = set()
+    for r in regs:
+        if r.get("key") == primary_key:
+            continue
+        fm = r.get("form")
+        if fm and fm[1] not in seen:
+            extra.append(fm)
+            seen.add(fm[1])
+    if extra:
+        L += ["", "We'd also take care of a couple of registrations for you \u2014 you can complete those here as well:"]
+        for nm_, u in extra:
+            lab = nm_[:-5] if str(nm_).lower().endswith(" form") else nm_
+            L += ["%s: %s" % (lab, u)]
+    L += ["", "If you have any questions, or would like to talk anything through, just let me know \u2014 I'd be glad to help."]
+    return subject, "\n".join(L)
+
+
 def _email_for(d):
-    """Produce his EXACT proposal email (subject, body) using his own build_email,
-    by round-tripping the contract through his read_ltd/read_partnership so all the
-    conditional registration links come out exactly as his desktop tool makes them."""
+    """Produce the proposal email. LTD/SA use _enhanced_email (his wording + itemised
+    setup + 3 onboarding scenarios); PARTNERSHIP keeps his original build_email."""
     kind = (d.get("kind") or "LTD").upper()
+    scenario = d.get("scenario") or ""
     tmpdir = tempfile.mkdtemp()
     wb_path = os.path.join(tmpdir, "wb.xlsx")
-    wb = _build_workbook_ltd(d)
-    if kind == "PARTNERSHIP":
-        wb.active.title = "Partnership Proposal"
+    if kind == "SA":
+        wb = _build_workbook_sa(d)
+    else:
+        wb = _build_workbook_ltd(d)
+        if kind == "PARTNERSHIP":
+            wb.active.title = "Partnership Proposal"
     wb.save(wb_path)
     wb2 = GEN.safe_load_workbook(wb_path)
+    if kind == "SA":
+        return _enhanced_email(GEN.read_sa(wb2), "SA", scenario)
     if kind == "PARTNERSHIP":
-        dd = GEN.read_partnership(wb2)
-        return GEN.build_email(dd, "PARTNERSHIP")
-    dd = GEN.read_ltd(wb2)
-    return GEN.build_email(dd, "LTD")
+        return GEN.build_email(GEN.read_partnership(wb2), "PARTNERSHIP")
+    return _enhanced_email(GEN.read_ltd(wb2), "LTD", scenario)
 
 
 @app.route("/email", methods=["POST", "OPTIONS"])
@@ -308,9 +511,15 @@ def send():
         except Exception:
             pass  # fall back to whatever html/subject was supplied
 
-    frm = _mail_from()
+    # Sender mailbox: the platform may choose which mailbox to send from (info@, payroll@, etc).
+    # Falls back to MAIL_FROM. If ALLOWED_FROM is set (comma-separated), the chosen mailbox
+    # must be on that list - a light guard so only your real mailboxes can be used.
+    frm = (d.get("from") or "").strip() or _mail_from()
     if not frm:
         return jsonify(error="Sending mailbox not configured (MAIL_FROM)."), 500
+    allow = [a.strip().lower() for a in (os.environ.get("ALLOWED_FROM") or "").split(",") if a.strip()]
+    if allow and frm.lower() not in allow:
+        return jsonify(error="That sending mailbox (%s) is not on the allowed list." % frm), 400
 
     message = {
         "subject": subject,
