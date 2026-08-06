@@ -321,89 +321,99 @@ def _pdf_bytes_for(d):
 
 
 def _enhanced_email(d, kind, scenario):
-    """His proposal email, reproduced verbatim for the unchanged parts, PLUS:
-    an itemised setup-cost breakdown, and one of three onboarding scenarios
-    (newco = we register / switcher = moving from another firm / existing =
-    has a business but no previous accountant). His a2z_proposals_fpdf.py is
-    NOT modified - this layers on top of the data his read_* returns."""
+    """Returns (subject, text_body, html_body). Text is his exact wording; html is a
+    branded design (navy + GREEN, matching the proposal PDF, so it is clearly distinct
+    from the welcome email's gold). His a2z_proposals_fpdf.py is NOT modified."""
     K = kind.upper()
     gbp = GEN.gbp
     num = GEN.num
     FORMS = GEN.FORMS
+
+    def esc(s):
+        return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                .replace("\u00a3", "&pound;").replace("\u2014", "&mdash;")
+                .replace("\u2013", "&ndash;").replace("\u2019", "&rsquo;")
+                .replace("\u2018", "&lsquo;").replace("\u2026", "&hellip;"))
+
     name = (str(d.get("contact") or "there").strip()) or "there"
     company = (str(d.get("company") or "your business").strip()) or "your business"
     subject = "Your A2Z proposal for %s" % company
     svc = [str(r[0]).strip() for r in d.get("lines", []) if str(r[0]).strip()]
     regs = d.get("regs") or []
     keys = {r.get("key") for r in regs}
+    intro = ("Thank you for the opportunity to look after %s \u2014 it's a pleasure to put this "
+             "proposal together for you. I've attached the full proposal, and here's a quick summary." % company)
 
-    L = ["Hi %s," % name, "",
-         ("Thank you for the opportunity to look after %s \u2014 it's a pleasure to put this "
-          "proposal together for you. I've attached the full proposal, and here's a quick summary." % company),
-         "", "What we'd take care of for you:"]
+    L = ["Hi %s," % name, "", intro, "", "What we'd take care of for you:"]
     L += ["\u2022 %s" % x for x in (svc or ["the services we discussed"])]
     L += [""]
 
-    # ---- fee line (his exact wording) ----
+    # ---- fee ----
+    fee_lines = []
+    fee_display = ""
+    fee_sub = "a single fixed amount, with no surprise bills along the way"
     if K == "LTD":
-        L += ["Your fee would be %s + VAT a month \u2014 a single fixed amount, with no surprise bills along the way." % gbp(d.get("sub", 0))]
+        fee_display = "%s + VAT" % gbp(d.get("sub", 0)); fee_period = "per month"
+        fee_lines.append("Your fee would be %s + VAT a month \u2014 a single fixed amount, with no surprise bills along the way." % gbp(d.get("sub", 0)))
         if (num(d.get("discount", 0)) or 0) > 0:
-            L += ["As an exceptional act of discretion, a goodwill discount of %s + VAT per month has been applied. Your fee above already reflects this." % gbp(d["discount"])]
+            fee_lines.append("As an exceptional act of discretion, a goodwill discount of %s + VAT per month has been applied. Your fee above already reflects this." % gbp(d["discount"]))
         nd = int(num(d.get("directors", 0)) or 0)
         if nd == 1:
-            L += ["Each director's personal tax return (self-assessment) is \u00a3120 + VAT a year, billed separately."]
+            fee_lines.append("Each director's personal tax return (self-assessment) is \u00a3120 + VAT a year, billed separately.")
         elif nd > 1:
-            L += ["Each director's personal tax return (self-assessment) is \u00a3120 + VAT a year, billed separately \u2014 for %d directors that comes to %s + VAT a year." % (nd, gbp(nd * 120))]
-    else:  # SA
+            fee_lines.append("Each director's personal tax return (self-assessment) is \u00a3120 + VAT a year, billed separately \u2014 for %d directors that comes to %s + VAT a year." % (nd, gbp(nd * 120)))
+    else:
         m = num(d.get("monthly", 0)) or 0
         a = num(d.get("annual", 0)) or 0
         if m > 0:
-            L += ["Your fee would be %s + VAT a month \u2014 a single fixed amount, with no surprise bills along the way." % gbp(d["monthly"])]
+            fee_display = "%s + VAT" % gbp(d["monthly"]); fee_period = "per month"
+            fee_lines.append("Your fee would be %s + VAT a month \u2014 a single fixed amount, with no surprise bills along the way." % gbp(d["monthly"]))
         elif a > 0:
-            L += ["Your fee would be %s + VAT a year \u2014 a single fixed amount, with no surprise bills along the way." % gbp(d["annual"])]
+            fee_display = "%s + VAT" % gbp(d["annual"]); fee_period = "per year"
+            fee_lines.append("Your fee would be %s + VAT a year \u2014 a single fixed amount, with no surprise bills along the way." % gbp(d["annual"]))
         else:
-            L += ["Your fee is set out in the attached proposal."]
+            fee_period = ""
+            fee_lines.append("Your fee is set out in the attached proposal.")
+    for fl in fee_lines:
+        L += [fl]
     L += [""]
 
-    # ---- itemised setup breakdown ----
-    setup_items = []
+    # ---- itemised setup ----
+    setup_rows = []   # (label, value)
     setup_total = 0
     reg_labels = set()
     for r in regs:
-        lab = str(r.get("label") or "").strip().lower()
-        reg_labels.add(lab)
+        lab = str(r.get("label") or "").strip()
+        reg_labels.add(lab.lower())
         fee = num(r.get("fee")) or 0
         if r.get("included") or fee <= 0:
-            setup_items.append("\u2022 %s \u2014 included" % r["label"])
+            setup_rows.append((lab, "included"))
         else:
-            setup_items.append("\u2022 %s \u2014 %s + VAT" % (r["label"], gbp(fee)))
-            setup_total += fee
+            setup_rows.append((lab, "%s + VAT" % gbp(fee))); setup_total += fee
     for o in d.get("oneoffs", []):
         desc = str(o[0]).strip() if o and len(o) > 0 else ""
         price = num(o[2]) if o and len(o) > 2 else 0
         if not desc:
             continue
         dl = desc.lower()
-        # skip if this one-off is already shown as a registration (same or contained label)
         if any(dl == rl or dl in rl or rl in dl for rl in reg_labels):
             continue
         if price and price > 0:
-            setup_items.append("\u2022 %s \u2014 %s + VAT" % (desc, gbp(price)))
-            setup_total += price
+            setup_rows.append((desc, "%s + VAT" % gbp(price))); setup_total += price
         else:
-            setup_items.append("\u2022 %s \u2014 included" % desc)
+            setup_rows.append((desc, "included"))
     osub = num(d.get("osub", 0)) or 0
-    if osub > setup_total:   # trust the workbook subtotal if it is higher
+    if osub > setup_total:
         setup_total = osub
-    if setup_items:
+    setup_total_line = ("One-off setup: %s + VAT" % gbp(setup_total)) if setup_total > 0 else "There's no charge for your setup \u2014 it's all included."
+    if setup_rows:
         L += ["To get you set up, here's the one-off work at the start:"]
-        L += setup_items
-        L += ["One-off setup: %s + VAT" % gbp(setup_total) if setup_total > 0 else "There's no charge for your setup \u2014 it's all included."]
-        L += [""]
+        L += ["\u2022 %s \u2014 %s" % (lab, val) for lab, val in setup_rows]
+        L += [setup_total_line, ""]
     elif osub > 0:
         L += ["There's also a one-off setup of %s + VAT to get everything in place at the start." % gbp(osub), ""]
 
-    # ---- onboarding: one of three scenarios ----
+    # ---- onboarding scenario ----
     primary_key = "company" if K == "LTD" else "sa"
     primary_fee = 0
     for r in regs:
@@ -414,24 +424,27 @@ def _enhanced_email(d, kind, scenario):
     reg_name, reg_url = FORMS[K]["reg"]
     sc = (scenario or "").lower()
     if sc not in ("newco", "switcher", "existing"):
-        sc = "newco" if primary_key in keys else "existing"   # infer if not supplied
+        sc = "newco" if primary_key in keys else "existing"
     thing = "company" if K == "LTD" else "business"
-
     if sc == "newco":
         if K == "LTD":
             feebit = (" (the company formation fee is %s + VAT, charged once)" % gbp(primary_fee)) if primary_fee > 0 else ""
-            L += ["As we're forming %s for you, the first step is to complete our %s%s, which only takes a few minutes:" % (company, reg_name, feebit), reg_url]
+            onboard_text = "As we're forming %s for you, the first step is to complete our %s%s, which only takes a few minutes:" % (company, reg_name, feebit)
         else:
-            L += ["To get you registered, the first step is to complete our %s, which only takes a few minutes:" % reg_name, reg_url]
+            onboard_text = "To get you registered, the first step is to complete our %s, which only takes a few minutes:" % reg_name
+        cta_label, cta_url = "Open the " + reg_name, reg_url
     elif sc == "switcher":
-        L += ["You're moving to us from another accountant, so there's nothing for you to chase \u2014 just complete our %s and we'll write to your current accountant for professional clearance and handle the whole handover for you:" % onboard_name, onboard_url]
-    else:  # existing
+        onboard_text = "You're moving to us from another accountant, so there's nothing for you to chase \u2014 just complete our %s and we'll write to your current accountant for professional clearance and handle the whole handover for you:" % onboard_name
+        cta_label, cta_url = "Open the " + onboard_name, onboard_url
+    else:
         if K == "LTD":
-            L += ["As your %s is already set up and you've not had an accountant before, getting started is simply completing our %s, which only takes a few minutes:" % (thing, onboard_name), onboard_url]
+            onboard_text = "As your %s is already set up and you've not had an accountant before, getting started is simply completing our %s, which only takes a few minutes:" % (thing, onboard_name)
         else:
-            L += ["As you're already trading and you've not had an accountant before, getting started is simply completing our %s, which only takes a few minutes:" % onboard_name, onboard_url]
+            onboard_text = "As you're already trading and you've not had an accountant before, getting started is simply completing our %s, which only takes a few minutes:" % onboard_name
+        cta_label, cta_url = "Open the " + onboard_name, onboard_url
+    L += [onboard_text, cta_url]
 
-    # ---- extra registration links (non-primary), exactly as his build_email does ----
+    # ---- extra registration links ----
     extra = []
     seen = set()
     for r in regs:
@@ -439,15 +452,87 @@ def _enhanced_email(d, kind, scenario):
             continue
         fm = r.get("form")
         if fm and fm[1] not in seen:
-            extra.append(fm)
+            lab = fm[0][:-5] if str(fm[0]).lower().endswith(" form") else fm[0]
+            extra.append((lab, fm[1]))
             seen.add(fm[1])
     if extra:
         L += ["", "We'd also take care of a couple of registrations for you \u2014 you can complete those here as well:"]
-        for nm_, u in extra:
-            lab = nm_[:-5] if str(nm_).lower().endswith(" form") else nm_
+        for lab, u in extra:
             L += ["%s: %s" % (lab, u)]
-    L += ["", "If you have any questions, or would like to talk anything through, just let me know \u2014 I'd be glad to help."]
-    return subject, "\n".join(L)
+    closing = "If you have any questions, or would like to talk anything through, just let me know \u2014 I'd be glad to help."
+    L += ["", closing]
+    text_body = "\n".join(L)
+
+    # ---------- branded HTML (navy + green) ----------
+    NAVY = "#0D2B42"; GREEN = "#1E6B47"; CREAM = "#FBF8F3"; INK = "#243a4d"; MUTE = "#9fb3c8"
+    svc_rows = "".join(
+        '<tr><td valign="top" style="padding:3px 10px 3px 0;color:%s;font-weight:bold;">&#10003;</td>'
+        '<td style="padding:3px 0;color:%s;font-size:15px;">%s</td></tr>' % (GREEN, INK, esc(x))
+        for x in (svc or ["the services we discussed"]))
+    setup_html = ""
+    if setup_rows:
+        rows = "".join(
+            '<tr><td style="padding:7px 0;border-bottom:1px solid #eee6d8;color:%s;font-size:14px;">%s</td>'
+            '<td align="right" style="padding:7px 0;border-bottom:1px solid #eee6d8;color:%s;font-size:14px;white-space:nowrap;">%s</td></tr>'
+            % (INK, esc(lab), (GREEN if val == "included" else INK), esc(val))
+            for lab, val in setup_rows)
+        total_html = ('<tr><td style="padding:9px 0 0;font-weight:bold;color:%s;font-size:14px;">%s</td><td></td></tr>' % (GREEN, esc(setup_total_line))) if setup_total <= 0 else ('<tr><td style="padding:9px 0 0;font-weight:bold;color:%s;">One-off setup</td><td align="right" style="padding:9px 0 0;font-weight:bold;color:%s;white-space:nowrap;">%s + VAT</td></tr>' % (GREEN, GREEN, esc(gbp(setup_total))))
+        setup_html = (
+            '<div style="font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:%s;font-weight:bold;margin:26px 0 10px;">To get you set up</div>'
+            '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="border:1px solid #eee6d8;border-radius:8px;padding:6px 16px;background:#FCFAF5;">%s%s</table>'
+            % (GREEN, rows, total_html))
+    fee_lines_html = "".join('<p style="margin:12px 0 0;color:%s;font-size:14px;line-height:1.6;">%s</p>' % (INK, esc(fl)) for fl in fee_lines[1:])
+    extra_html = ""
+    if extra:
+        links = "".join('<div style="margin:6px 0;"><a href="%s" style="color:%s;font-weight:bold;text-decoration:none;font-size:14px;">%s &rarr;</a></div>' % (u, GREEN, esc(lab)) for lab, u in extra)
+        extra_html = ('<p style="margin:22px 0 6px;color:%s;font-size:15px;">We\'d also take care of a couple of registrations for you &mdash; you can complete those here as well:</p>%s' % (INK, links))
+    fee_box = ""
+    if fee_display:
+        fee_box = (
+            '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="margin:22px 0;"><tr>'
+            '<td style="background:%s;border-radius:8px;padding:20px 24px;">'
+            '<div style="color:%s;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;">Your fee</div>'
+            '<div style="color:#ffffff;font-size:30px;font-family:Georgia,serif;margin:4px 0 2px;">%s</div>'
+            '<div style="color:#cfe3d8;font-size:13px;">%s &middot; %s</div>'
+            '</td></tr></table>' % (NAVY, MUTE, esc(fee_display), esc(fee_period), esc(fee_sub)))
+    html_body = (
+        '<div style="margin:0;padding:0;background:%s;">'
+        '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="background:%s;"><tr><td align="center" style="padding:24px 12px;">'
+        '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%%;">'
+        # header
+        '<tr><td style="background:%s;padding:26px 32px;border-radius:10px 10px 0 0;">'
+        '<div style="font-family:Georgia,serif;color:#EAF0F7;font-size:13px;letter-spacing:3px;">A2Z ACCOUNTING SOLUTIONS</div>'
+        '<div style="height:3px;width:46px;background:%s;margin:14px 0;"></div>'
+        '<div style="color:%s;font-size:11px;letter-spacing:2px;text-transform:uppercase;">Proposal of services</div>'
+        '<div style="color:#ffffff;font-size:23px;font-family:Georgia,serif;margin-top:3px;">%s</div>'
+        '</td></tr>'
+        # body
+        '<tr><td style="background:#ffffff;padding:30px 32px;font-family:Arial,Helvetica,sans-serif;">'
+        '<p style="margin:0 0 16px;color:%s;font-size:15px;">Hi %s,</p>'
+        '<p style="margin:0 0 20px;color:%s;font-size:15px;line-height:1.65;">%s</p>'
+        '<div style="font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:%s;font-weight:bold;margin:0 0 10px;">What we\'d take care of for you</div>'
+        '<table role="presentation" cellpadding="0" cellspacing="0">%s</table>'
+        '%s'   # fee box
+        '%s'   # fee lines (directors etc)
+        '%s'   # setup
+        '<p style="margin:24px 0 14px;color:%s;font-size:15px;line-height:1.65;">%s</p>'
+        '<a href="%s" style="display:inline-block;background:%s;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:6px;font-weight:bold;font-size:14px;">%s</a>'
+        '%s'   # extra links
+        '<p style="margin:24px 0 0;color:%s;font-size:15px;line-height:1.65;">%s</p>'
+        '</td></tr>'
+        # footer
+        '<tr><td style="background:%s;padding:18px 32px;border-radius:0 0 10px 10px;color:%s;font-size:12px;line-height:1.7;">'
+        'A2Z Accounting Solutions &middot; 01224 042961 &middot; info@a2zaccounting.co.uk<br>'
+        '1st Floor, 499 Union Street, Aberdeen, AB11 6DB &middot; Regulated by ACCA'
+        '</td></tr>'
+        '</table></td></tr></table></div>'
+    ) % (CREAM, CREAM, NAVY, GREEN, MUTE, esc(company),
+         INK, esc(name), INK, esc(intro), GREEN, svc_rows,
+         fee_box, fee_lines_html, setup_html,
+         INK, esc(onboard_text), cta_url, GREEN, esc(cta_label),
+         extra_html, INK, esc(closing), NAVY, MUTE)
+
+    return subject, text_body, html_body
 
 
 def _email_for(d):
@@ -468,7 +553,8 @@ def _email_for(d):
     if kind == "SA":
         return _enhanced_email(GEN.read_sa(wb2), "SA", scenario)
     if kind == "PARTNERSHIP":
-        return GEN.build_email(GEN.read_partnership(wb2), "PARTNERSHIP")
+        psub, pbody = GEN.build_email(GEN.read_partnership(wb2), "PARTNERSHIP")
+        return psub, pbody, _text_to_html(pbody)
     return _enhanced_email(GEN.read_ltd(wb2), "LTD", scenario)
 
 
@@ -479,8 +565,8 @@ def email():
         return ("", 204)
     d = request.get_json(force=True, silent=True) or {}
     try:
-        subject, body = _email_for(d)
-        return jsonify(ok=True, subject=subject, body=body)
+        subject, body, html = _email_for(d)
+        return jsonify(ok=True, subject=subject, body=body, html=html)
     except Exception as e:
         return jsonify(error="Could not build the email", detail=str(e)), 500
 
@@ -505,9 +591,9 @@ def send():
     # matches his desktop tool exactly (warm tone, service list, all reg links).
     if d.get("attach_proposal") and d.get("proposal") and not d.get("html_override"):
         try:
-            esubject, ebody = _email_for(d["proposal"])
+            esubject, ebody, ehtml = _email_for(d["proposal"])
             subject = subject or esubject
-            html = _text_to_html(ebody)
+            html = ehtml or _text_to_html(ebody)
         except Exception:
             pass  # fall back to whatever html/subject was supplied
 
