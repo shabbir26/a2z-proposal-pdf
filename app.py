@@ -8,7 +8,7 @@ build_ltd / build_sa / build_partnership and returns the byte-identical PDF.
 
 His generator code is never modified - it is imported and called as-is.
 """
-import io, os, tempfile, datetime
+import io, os, tempfile, datetime, traceback
 from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
 import openpyxl
@@ -222,6 +222,9 @@ def proposal():
         else:
             return jsonify(error="Unknown kind: %s" % kind), 400
     except Exception as e:
+        print("=== PROPOSAL PDF BUILD ERROR ===", flush=True)
+        traceback.print_exc()
+        print("=== END ERROR (kind=%s) ===" % (d.get("kind")), flush=True)
         return jsonify(error="PDF build failed", detail=str(e)), 500
 
     fname = (d.get("company") or "Proposal").replace("/", " ").replace("\\", " ")
@@ -628,6 +631,9 @@ def send():
                 "contentBytes": _b64.b64encode(pdf).decode("ascii"),
             }]
         except Exception as e:
+            print("=== SEND: PDF ATTACHMENT BUILD ERROR ===", flush=True)
+            traceback.print_exc()
+            print("=== END ERROR ===", flush=True)
             return jsonify(error="Could not build the PDF attachment", detail=str(e)), 500
 
     try:
