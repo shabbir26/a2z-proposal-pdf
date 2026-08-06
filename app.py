@@ -8,10 +8,40 @@ build_ltd / build_sa / build_partnership and returns the byte-identical PDF.
 
 His generator code is never modified - it is imported and called as-is.
 """
-import io, os, tempfile, datetime, traceback
+import io, os, tempfile, datetime, traceback, shutil, glob
 from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
 import openpyxl
+
+# --- Font self-heal ------------------------------------------------------
+# His generator loads fonts from a "fonts/" subfolder next to it. When the .ttf
+# files get uploaded loose at the repo root (GitHub drag-drop drops folders),
+# they end up beside this file instead of inside fonts/. Make it robust: ensure
+# a fonts/ folder exists and holds the 5 ttf, copying any that sit at the top
+# level. Runs before importing his module so the path is ready. His file is
+# NOT modified.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_FONTS_DIR = os.path.join(_HERE, "fonts")
+_NEEDED = ["Cormorant-Bold.ttf", "Cormorant-SemiBold.ttf",
+           "Nunito-Regular.ttf", "Nunito-SemiBold.ttf", "Nunito-Bold.ttf"]
+try:
+    os.makedirs(_FONTS_DIR, exist_ok=True)
+    # index every .ttf anywhere under the project root, by filename
+    found = {}
+    for path in glob.glob(os.path.join(_HERE, "**", "*.ttf"), recursive=True):
+        found.setdefault(os.path.basename(path), path)
+    for fn in _NEEDED:
+        dest = os.path.join(_FONTS_DIR, fn)
+        if not os.path.exists(dest) and fn in found and os.path.abspath(found[fn]) != os.path.abspath(dest):
+            shutil.copyfile(found[fn], dest)
+    missing = [fn for fn in _NEEDED if not os.path.exists(os.path.join(_FONTS_DIR, fn))]
+    if missing:
+        print("FONT SELF-HEAL: still missing %s (looked under %s)" % (missing, _HERE), flush=True)
+    else:
+        print("FONT SELF-HEAL: all 5 fonts present in %s" % _FONTS_DIR, flush=True)
+except Exception as _e:
+    print("FONT SELF-HEAL failed: %s" % _e, flush=True)
+# ------------------------------------------------------------------------
 
 import a2z_proposals_fpdf as GEN  # his file, untouched
 
