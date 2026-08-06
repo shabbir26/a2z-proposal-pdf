@@ -165,6 +165,194 @@ def proposal():
                      as_attachment=True, download_name=fname)
 
 
+# ------------------------------------------------------------------
+#  Direct email send via Microsoft 365 Graph (reuses the firm's
+#  existing Entra app - Mail.Send application permission, admin
+#  consent already granted for the Academy). Set these env vars on
+#  the Render service (copy the values from the Academy setup):
+#     MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET
+#     MAIL_FROM        (or INVITE_FROM) - the sending mailbox, e.g. info@a2zaccounting.co.uk
+#     SEND_TOKEN       (optional but recommended) - a shared secret the
+#                      platform must send in the X-A2Z-Token header
+# ------------------------------------------------------------------
+import base64 as _b64
+import requests as _rq
+
+
+def _mail_from():
+    return os.environ.get("MAIL_FROM") or os.environ.get("INVITE_FROM") or ""
+
+
+import re as _re
+
+
+def _text_to_html(text):
+    """Turn his plain-text email into simple, email-safe HTML:
+    URLs become clickable links, bullet lines render as bullets, blank lines
+    become paragraph breaks. Keeps his wording exactly."""
+    def esc(s):
+        return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+    url_re = _re.compile(r"(https?://[^\s]+)")
+    out = []
+    out.append('<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;'
+               'color:#1b2a38;line-height:1.6">')
+    for raw in text.split("\n"):
+        line = raw.rstrip()
+        if line == "":
+            out.append("<br>")
+            continue
+        safe = esc(line)
+        safe = url_re.sub(lambda m: '<a href="%s" style="color:#1e6b47">%s</a>'
+                          % (m.group(1), m.group(1)), safe)
+        if line.startswith("\u2022 "):
+            out.append('<div style="margin:2px 0 2px 8px">&bull; %s</div>' % safe[2:])
+        else:
+            out.append('<div>%s</div>' % safe)
+    out.append("</div>")
+    return "".join(out)
+
+
+def _graph_token():
+    tid = os.environ.get("MS_TENANT_ID", "")
+    cid = os.environ.get("MS_CLIENT_ID", "")
+    sec = os.environ.get("MS_CLIENT_SECRET", "")
+    if not (tid and cid and sec):
+        raise RuntimeError("Microsoft 365 not configured (MS_TENANT_ID / MS_CLIENT_ID / MS_CLIENT_SECRET missing).")
+    r = _rq.post(
+        "https://login.microsoftonline.com/%s/oauth2/v2.0/token" % tid,
+        data={
+            "client_id": cid,
+            "client_secret": sec,
+            "scope": "https://graph.microsoft.com/.default",
+            "grant_type": "client_credentials",
+        }, timeout=30)
+    r.raise_for_status()
+    return r.json()["access_token"]
+
+
+def _pdf_bytes_for(d):
+    """Build the proposal PDF (same path as /proposal) and return raw bytes."""
+    kind = (d.get("kind") or "LTD").upper()
+    tmpdir = tempfile.mkdtemp()
+    wb_path = os.path.join(tmpdir, "wb.xlsx")
+    out_path = os.path.join(tmpdir, "proposal.pdf")
+    wb = _build_workbook_ltd(d)
+    if kind == "PARTNERSHIP":
+        wb.active.title = "Partnership Proposal"
+    wb.save(wb_path)
+    wb2 = GEN.safe_load_workbook(wb_path)
+    if kind == "PARTNERSHIP":
+        GEN.build_partnership(wb2, out_path, ref=d.get("ref"))
+    else:
+        GEN.build_ltd(wb2, out_path, ref=d.get("ref"))
+    with open(out_path, "rb") as f:
+        return f.read()
+
+
+def _email_for(d):
+    """Produce his EXACT proposal email (subject, body) using his own build_email,
+    by round-tripping the contract through his read_ltd/read_partnership so all the
+    conditional registration links come out exactly as his desktop tool makes them."""
+    kind = (d.get("kind") or "LTD").upper()
+    tmpdir = tempfile.mkdtemp()
+    wb_path = os.path.join(tmpdir, "wb.xlsx")
+    wb = _build_workbook_ltd(d)
+    if kind == "PARTNERSHIP":
+        wb.active.title = "Partnership Proposal"
+    wb.save(wb_path)
+    wb2 = GEN.safe_load_workbook(wb_path)
+    if kind == "PARTNERSHIP":
+        dd = GEN.read_partnership(wb2)
+        return GEN.build_email(dd, "PARTNERSHIP")
+    dd = GEN.read_ltd(wb2)
+    return GEN.build_email(dd, "LTD")
+
+
+@app.route("/email", methods=["POST", "OPTIONS"])
+def email():
+    """Return his exact proposal email as {subject, body} for the given contract."""
+    if request.method == "OPTIONS":
+        return ("", 204)
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        subject, body = _email_for(d)
+        return jsonify(ok=True, subject=subject, body=body)
+    except Exception as e:
+        return jsonify(error="Could not build the email", detail=str(e)), 500
+
+
+@app.route("/send", methods=["POST", "OPTIONS"])
+def send():
+    if request.method == "OPTIONS":
+        return ("", 204)
+    # optional shared-secret guard
+    want = os.environ.get("SEND_TOKEN")
+    if want and request.headers.get("X-A2Z-Token") != want:
+        return jsonify(error="Not authorised"), 401
+
+    d = request.get_json(force=True, silent=True) or {}
+    to = (d.get("to") or "").strip()
+    subject = d.get("subject") or ""
+    html = d.get("html") or ""
+    if not to:
+        return jsonify(error="No recipient (to) provided"), 400
+
+    # For a proposal send, build the subject/body from HIS OWN build_email so it
+    # matches his desktop tool exactly (warm tone, service list, all reg links).
+    if d.get("attach_proposal") and d.get("proposal") and not d.get("html_override"):
+        try:
+            esubject, ebody = _email_for(d["proposal"])
+            subject = subject or esubject
+            html = _text_to_html(ebody)
+        except Exception:
+            pass  # fall back to whatever html/subject was supplied
+
+    frm = _mail_from()
+    if not frm:
+        return jsonify(error="Sending mailbox not configured (MAIL_FROM)."), 500
+
+    message = {
+        "subject": subject,
+        "body": {"contentType": "HTML", "content": html},
+        "toRecipients": [{"emailAddress": {"address": to}}],
+    }
+    cc = d.get("cc") or []
+    if cc:
+        message["ccRecipients"] = [{"emailAddress": {"address": a}} for a in cc]
+
+    # optional proposal PDF attachment
+    if d.get("attach_proposal") and d.get("proposal"):
+        try:
+            pdf = _pdf_bytes_for(d["proposal"])
+            name = d.get("attachment_name") or ((d["proposal"].get("company") or "Proposal") + " - proposal.pdf")
+            message["attachments"] = [{
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": name,
+                "contentType": "application/pdf",
+                "contentBytes": _b64.b64encode(pdf).decode("ascii"),
+            }]
+        except Exception as e:
+            return jsonify(error="Could not build the PDF attachment", detail=str(e)), 500
+
+    try:
+        token = _graph_token()
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+    try:
+        r = _rq.post(
+            "https://graph.microsoft.com/v1.0/users/%s/sendMail" % frm,
+            headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+            json={"message": message, "saveToSentItems": True}, timeout=60)
+    except Exception as e:
+        return jsonify(error="Send request failed", detail=str(e)), 502
+
+    if r.status_code in (200, 202):
+        return jsonify(ok=True, sent_to=to, attached=bool(message.get("attachments")))
+    return jsonify(error="Microsoft 365 rejected the send", status=r.status_code, detail=r.text[:500]), 502
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port)
