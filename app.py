@@ -604,6 +604,230 @@ def email():
         return jsonify(error="Could not build the email", detail=str(e)), 500
 
 
+
+# ------------------------------------------------------------------
+#  INVOICE PDF + inline logo (added Aug 2026)
+#  The platform posts invoice data with a send; the service builds a
+#  branded A2Z invoice PDF (navy/green, Nunito + Cormorant from the
+#  same fonts/ folder) and attaches it. If the platform also sends
+#  its embedded logo (logo_b64), the logo is used on the PDF AND
+#  attached inline to the email as cid:a2zlogo, replacing the text
+#  header of the standard email shell. His generator is untouched.
+# ------------------------------------------------------------------
+from fpdf import FPDF as _FPDF
+
+
+def _logo_tmp(logo_b64):
+    """Accepts a raw base64 PNG or a data URL; returns a temp file path or None."""
+    if not logo_b64:
+        return None
+    b = str(logo_b64).strip()
+    if b.lower().startswith("data:"):
+        b = b.split(",", 1)[-1]
+    try:
+        raw = _b64.b64decode(b)
+        p = os.path.join(tempfile.mkdtemp(), "logo.png")
+        with open(p, "wb") as f:
+            f.write(raw)
+        return p
+    except Exception:
+        return None
+
+
+def _invoice_pdf_bytes(inv, logo_path=None):
+    NAVY = (22, 55, 90); GREEN = (30, 107, 71); GOLD = (196, 144, 90)
+    INK = (35, 39, 43); MUTE = (110, 116, 122); LINE = (226, 210, 168)
+
+    def n2(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def gbp2(v):
+        return u"\u00a3{:,.2f}".format(n2(v))
+
+    pdf = _FPDF(format="A4")
+    pdf.set_auto_page_break(True, margin=20)
+    try:
+        pdf.add_font("Nunito", "", os.path.join(_FONTS_DIR, "Nunito-Regular.ttf"))
+        pdf.add_font("Nunito", "B", os.path.join(_FONTS_DIR, "Nunito-Bold.ttf"))
+        pdf.add_font("CormorantB", "", os.path.join(_FONTS_DIR, "Cormorant-Bold.ttf"))
+        BODY, HEAD = "Nunito", "CormorantB"
+    except Exception:
+        BODY, HEAD = "Helvetica", "Helvetica"
+    pdf.add_page()
+    M, W = 18, 210 - 36
+
+    # header: logo (or wordmark) left, INVOICE + number right
+    y0 = 16
+    if logo_path:
+        try:
+            pdf.image(logo_path, x=M, y=y0, h=14)
+        except Exception:
+            logo_path = None
+    if not logo_path:
+        pdf.set_font(HEAD, "", 22)
+        pdf.set_text_color(*NAVY)
+        pdf.set_xy(M, y0)
+        pdf.cell(90, 10, "A2Z Accounting")
+    pdf.set_font(HEAD, "", 24)
+    pdf.set_text_color(*NAVY)
+    pdf.set_xy(M, y0)
+    pdf.cell(W, 10, "INVOICE", align="R")
+    pdf.set_font(BODY, "B", 11)
+    pdf.set_text_color(*GOLD)
+    pdf.set_xy(M, y0 + 10)
+    pdf.cell(W, 6, str(inv.get("no") or ""), align="R")
+    pdf.set_font(BODY, "", 9)
+    pdf.set_text_color(*MUTE)
+    pdf.set_xy(M, y0 + 16)
+    pdf.cell(W, 5, "Issued %s   -   Due %s" % (inv.get("issue") or "", inv.get("due") or ""), align="R")
+
+    # gold rule
+    pdf.set_draw_color(*GOLD)
+    pdf.set_line_width(0.8)
+    pdf.line(M, 42, 210 - M, 42)
+
+    # billed to
+    pdf.set_xy(M, 48)
+    pdf.set_font(BODY, "B", 8)
+    pdf.set_text_color(*GREEN)
+    pdf.cell(60, 5, "BILLED TO")
+    pdf.set_xy(M, 54)
+    pdf.set_font(BODY, "B", 12)
+    pdf.set_text_color(*INK)
+    pdf.cell(120, 6, str(inv.get("client") or ""))
+    contact = str(inv.get("contact") or "").strip()
+    ytab = 62
+    if contact:
+        pdf.set_xy(M, 60)
+        pdf.set_font(BODY, "", 10)
+        pdf.set_text_color(*MUTE)
+        pdf.cell(120, 5, contact)
+        ytab = 68
+
+    # lines table
+    lines = inv.get("lines") or []
+    if not lines:
+        lines = [{"desc": "Professional services", "net": inv.get("sub") or 0, "vatRate": 20}]
+    colD, colN, colV, colT = W - 96, 32, 26, 38
+    pdf.set_xy(M, ytab + 4)
+    pdf.set_fill_color(*NAVY)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font(BODY, "B", 9)
+    pdf.cell(colD, 9, "  DESCRIPTION", fill=True)
+    pdf.cell(colN, 9, "NET  ", align="R", fill=True)
+    pdf.cell(colV, 9, "VAT  ", align="R", fill=True)
+    pdf.cell(colT, 9, "TOTAL  ", align="R", fill=True)
+    pdf.ln(9)
+    net_sum = 0.0
+    vat_sum = 0.0
+    pdf.set_font(BODY, "", 10)
+    for l in lines:
+        netv = n2(l.get("net"))
+        rate = l.get("vatRate")
+        rate = 20.0 if rate is None else n2(rate)
+        vatv = netv * rate / 100.0
+        net_sum += netv
+        vat_sum += vatv
+        pdf.set_x(M)
+        pdf.set_text_color(*INK)
+        pdf.set_draw_color(*LINE)
+        pdf.set_line_width(0.2)
+        pdf.cell(colD, 9, "  " + str(l.get("desc") or ""), border="B")
+        pdf.cell(colN, 9, gbp2(netv) + "  ", align="R", border="B")
+        pdf.set_text_color(*MUTE)
+        pdf.cell(colV, 9, ("%g%%  " % rate) if rate > 0 else "No VAT  ", align="R", border="B")
+        pdf.set_text_color(*INK)
+        pdf.cell(colT, 9, gbp2(netv + vatv) + "  ", align="R", border="B")
+        pdf.ln(9)
+    sub = n2(inv.get("sub")) or net_sum
+    vat = n2(inv.get("vat")) or vat_sum
+    gross = n2(inv.get("gross")) or (sub + vat)
+
+    # totals (right)
+    tx = M + W - 76
+    y = pdf.get_y() + 6
+    pdf.set_font(BODY, "", 10)
+    pdf.set_text_color(*MUTE)
+    pdf.set_xy(tx, y)
+    pdf.cell(40, 7, "Sub Total")
+    pdf.set_text_color(*INK)
+    pdf.cell(36, 7, gbp2(sub), align="R")
+    pdf.set_xy(tx, y + 7)
+    pdf.set_text_color(*MUTE)
+    pdf.cell(40, 7, "VAT")
+    pdf.set_text_color(*INK)
+    pdf.cell(36, 7, gbp2(vat), align="R")
+    pdf.set_xy(tx, y + 16)
+    pdf.set_fill_color(*NAVY)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font(BODY, "B", 11)
+    pdf.cell(40, 10, "  To Pay", fill=True)
+    pdf.cell(36, 10, gbp2(gross) + "  ", align="R", fill=True)
+
+    # bank details (left, same block as the email)
+    pdf.set_xy(M, y + 2)
+    pdf.set_font(BODY, "B", 10)
+    pdf.set_text_color(*NAVY)
+    pdf.cell(90, 6, "Payment by bank transfer")
+    pdf.set_font(BODY, "", 10)
+    pdf.set_text_color(*INK)
+    rows = [
+        "Name: A2Z Accounting Solutions Limited",
+        "Sort code: 20-29-24",
+        "Account: 23875458",
+        "Reference: %s" % (inv.get("no") or ""),
+    ]
+    yy = y + 8
+    for rline in rows:
+        pdf.set_xy(M, yy)
+        pdf.cell(110, 5.5, rline)
+        yy += 5.5
+
+    # footer
+    pdf.set_y(-26)
+    pdf.set_font(BODY, "", 8)
+    pdf.set_text_color(*MUTE)
+    pdf.cell(0, 5, "A2Z Accounting Solutions Ltd  -  499 Union Street, Aberdeen, AB11 6DB", align="C")
+    pdf.set_y(-21)
+    pdf.cell(0, 5, "01224 042961  -  info@a2zaccounting.co.uk", align="C")
+
+    out = pdf.output()
+    return bytes(out)
+
+
+@app.route("/invoice", methods=["POST", "OPTIONS"])
+def invoice():
+    """Return a branded invoice PDF for the posted invoice data (download)."""
+    if request.method == "OPTIONS":
+        return ("", 204)
+    d = request.get_json(force=True, silent=True) or {}
+    inv = d.get("invoice") or d
+    try:
+        pdf = _invoice_pdf_bytes(inv, _logo_tmp(d.get("logo_b64") or inv.get("logo_b64")))
+    except Exception as e:
+        print("=== INVOICE PDF BUILD ERROR ===", flush=True)
+        traceback.print_exc()
+        print("=== END ERROR ===", flush=True)
+        return jsonify(error="Invoice PDF build failed", detail=str(e)), 500
+    fname = "Invoice %s - A2Z Accounting Solutions.pdf" % (inv.get("no") or "")
+    return send_file(io.BytesIO(pdf), mimetype="application/pdf",
+                     as_attachment=True, download_name=fname)
+
+
+# The text header inside the platform's standard email shell (emailShell in
+# index.html). When a logo is supplied with a send, this exact block is swapped
+# for the real logo image referenced as an inline cid attachment.
+_SHELL_TEXT_HEADER = ('<div style="font-family:Cormorant Garamond,Georgia,serif;'
+                      'font-size:1.6rem;color:#fff;font-weight:700;letter-spacing:.02em">'
+                      'A2Z Accounting</div>')
+_SHELL_LOGO_HEADER = ('<div style="display:inline-block;background:#ffffff;border-radius:8px;'
+                      'padding:8px 18px;line-height:0"><img src="cid:a2zlogo" alt="A2Z Accounting" '
+                      'style="height:30px"></div>')
+
+
 @app.route("/send", methods=["POST", "OPTIONS"])
 def send():
     if request.method == "OPTIONS":
@@ -665,6 +889,47 @@ def send():
             traceback.print_exc()
             print("=== END ERROR ===", flush=True)
             return jsonify(error="Could not build the PDF attachment", detail=str(e)), 500
+
+    # optional invoice PDF attachment (added Aug 2026)
+    if d.get("attach_invoice") and d.get("invoice"):
+        try:
+            lp = _logo_tmp(d.get("logo_b64") or (d.get("invoice") or {}).get("logo_b64"))
+            ipdf = _invoice_pdf_bytes(d["invoice"], lp)
+            iname = d.get("attachment_name") or ("Invoice %s - A2Z Accounting Solutions.pdf" % (d["invoice"].get("no") or ""))
+            message.setdefault("attachments", []).append({
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": iname,
+                "contentType": "application/pdf",
+                "contentBytes": _b64.b64encode(ipdf).decode("ascii"),
+            })
+        except Exception as e:
+            print("=== SEND: INVOICE PDF BUILD ERROR ===", flush=True)
+            traceback.print_exc()
+            print("=== END ERROR ===", flush=True)
+            return jsonify(error="Could not build the invoice PDF", detail=str(e)), 500
+
+    # inline logo: swap the text header for the real logo image (added Aug 2026)
+    lb = d.get("logo_b64")
+    if lb:
+        b = str(lb).strip()
+        if b.lower().startswith("data:"):
+            b = b.split(",", 1)[-1]
+        try:
+            _b64.b64decode(b)
+            ok_logo = True
+        except Exception:
+            ok_logo = False
+        if ok_logo and _SHELL_TEXT_HEADER in html:
+            html = html.replace(_SHELL_TEXT_HEADER, _SHELL_LOGO_HEADER, 1)
+            message["body"]["content"] = html
+            message.setdefault("attachments", []).append({
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": "a2zlogo.png",
+                "contentType": "image/png",
+                "contentBytes": b,
+                "isInline": True,
+                "contentId": "a2zlogo",
+            })
 
     try:
         token = _graph_token()
