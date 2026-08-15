@@ -707,13 +707,6 @@ def _invoice_pdf_bytes(inv, logo_path=None):
     pdf.set_text_color(*INK)
     pdf.cell(110, 6, str(inv.get("client") or ""))
     ly = ytop + 13
-    contact = str(inv.get("contact") or "").strip()
-    if contact:
-        pdf.set_xy(M, ly)
-        pdf.set_font(BODY, "", 10)
-        pdf.set_text_color(*MUTE)
-        pdf.cell(110, 5, contact)
-        ly += 5.5
     addr = inv.get("address") or []
     if isinstance(addr, str):
         addr = [a.strip() for a in addr.split(",") if a.strip()]
@@ -735,7 +728,7 @@ def _invoice_pdf_bytes(inv, logo_path=None):
     ry = ytop + 12
     pdf.set_font(BODY, "", 9)
     pdf.set_text_color(*MUTE)
-    for rline in ("First Floor", "499 Union Street", "Aberdeen", "AB11 6DB", "01224 042961", "info@a2zaccounting.co.uk", "VAT No: 435116127"):
+    for rline in ("First Floor", "499 Union Street", "Aberdeen", "AB11 6DB", "01224 042961", "info@a2zaccounting.co.uk"):
         pdf.set_xy(fx, ry)
         pdf.cell(72, 4.8, rline)
         ry += 4.8
@@ -827,7 +820,7 @@ def _invoice_pdf_bytes(inv, logo_path=None):
     pdf.set_text_color(*MUTE)
     pdf.cell(0, 5, u"A2Z Accounting Solutions Limited  \u00b7  First Floor, 499 Union Street, Aberdeen, AB11 6DB", align="C")
     pdf.set_y(-21)
-    pdf.cell(0, 5, u"01224 042961  \u00b7  info@a2zaccounting.co.uk  \u00b7  VAT No 435116127", align="C")
+    pdf.cell(0, 5, u"01224 042961  \u00b7  info@a2zaccounting.co.uk", align="C")
 
     out = pdf.output()
     return bytes(out)
