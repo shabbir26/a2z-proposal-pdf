@@ -679,33 +679,67 @@ def _invoice_pdf_bytes(inv, logo_path=None):
     pdf.set_text_color(*GOLD)
     pdf.set_xy(M, y0 + 10)
     pdf.cell(W, 6, str(inv.get("no") or ""), align="R")
-    pdf.set_font(BODY, "", 9)
-    pdf.set_text_color(*MUTE)
-    pdf.set_xy(M, y0 + 16)
-    pdf.cell(W, 5, "Issued %s   -   Due %s" % (inv.get("issue") or "", inv.get("due") or ""), align="R")
+    # invoice meta: labelled issue / due / VAT number (readable, right-aligned)
+    my = y0 + 18
+    for lab, val in (("Issue date", inv.get("issue") or ""), ("Due date", inv.get("due") or ""), ("VAT No", "435116127")):
+        pdf.set_xy(M, my)
+        pdf.set_font(BODY, "", 9)
+        pdf.set_text_color(*MUTE)
+        pdf.cell(W - 34, 5, lab, align="R")
+        pdf.set_font(BODY, "B", 9)
+        pdf.set_text_color(*INK)
+        pdf.cell(34, 5, str(val), align="R")
+        my += 5
 
     # gold rule
     pdf.set_draw_color(*GOLD)
     pdf.set_line_width(0.8)
-    pdf.line(M, 42, 210 - M, 42)
+    pdf.line(M, 52, 210 - M, 52)
 
-    # billed to
-    pdf.set_xy(M, 48)
+    # parties: billed to (left) + our details (right)
+    ytop = 58
+    pdf.set_xy(M, ytop)
     pdf.set_font(BODY, "B", 8)
     pdf.set_text_color(*GREEN)
     pdf.cell(60, 5, "BILLED TO")
-    pdf.set_xy(M, 54)
+    pdf.set_xy(M, ytop + 6)
     pdf.set_font(BODY, "B", 12)
     pdf.set_text_color(*INK)
-    pdf.cell(120, 6, str(inv.get("client") or ""))
+    pdf.cell(110, 6, str(inv.get("client") or ""))
+    ly = ytop + 13
     contact = str(inv.get("contact") or "").strip()
-    ytab = 62
     if contact:
-        pdf.set_xy(M, 60)
+        pdf.set_xy(M, ly)
         pdf.set_font(BODY, "", 10)
         pdf.set_text_color(*MUTE)
-        pdf.cell(120, 5, contact)
-        ytab = 68
+        pdf.cell(110, 5, contact)
+        ly += 5.5
+    addr = inv.get("address") or []
+    if isinstance(addr, str):
+        addr = [a.strip() for a in addr.split(",") if a.strip()]
+    pdf.set_font(BODY, "", 9.5)
+    pdf.set_text_color(*INK)
+    for a in list(addr)[:5]:
+        pdf.set_xy(M, ly)
+        pdf.cell(110, 5, str(a))
+        ly += 5
+    fx = M + W - 72
+    pdf.set_xy(fx, ytop)
+    pdf.set_font(BODY, "B", 8)
+    pdf.set_text_color(*GREEN)
+    pdf.cell(72, 5, "FROM")
+    pdf.set_xy(fx, ytop + 6)
+    pdf.set_font(BODY, "B", 10)
+    pdf.set_text_color(*INK)
+    pdf.cell(72, 5, "A2Z Accounting Solutions Limited")
+    ry = ytop + 12
+    pdf.set_font(BODY, "", 9)
+    pdf.set_text_color(*MUTE)
+    for rline in ("First Floor, 499 Union Street,", "Aberdeen, AB11 6DB", "01224 042961", "info@a2zaccounting.co.uk", "VAT No: 435116127"):
+        pdf.set_xy(fx, ry)
+        pdf.cell(72, 4.8, rline)
+        ry += 4.8
+    ytab = max(ly, ry)
 
     # lines table
     lines = inv.get("lines") or []
@@ -786,13 +820,14 @@ def _invoice_pdf_bytes(inv, logo_path=None):
         pdf.cell(110, 5.5, rline)
         yy += 5.5
 
-    # footer
+    # footer (page break off so the last line never spills onto a blank page 2)
+    pdf.set_auto_page_break(False)
     pdf.set_y(-26)
     pdf.set_font(BODY, "", 8)
     pdf.set_text_color(*MUTE)
-    pdf.cell(0, 5, "A2Z Accounting Solutions Ltd  -  499 Union Street, Aberdeen, AB11 6DB", align="C")
+    pdf.cell(0, 5, u"A2Z Accounting Solutions Limited  \u00b7  First Floor, 499 Union Street, Aberdeen, AB11 6DB", align="C")
     pdf.set_y(-21)
-    pdf.cell(0, 5, "01224 042961  -  info@a2zaccounting.co.uk", align="C")
+    pdf.cell(0, 5, u"01224 042961  \u00b7  info@a2zaccounting.co.uk  \u00b7  VAT No 435116127", align="C")
 
     out = pdf.output()
     return bytes(out)
