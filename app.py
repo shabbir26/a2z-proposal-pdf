@@ -735,7 +735,7 @@ def _invoice_pdf_bytes(inv, logo_path=None):
     ry = ytop + 12
     pdf.set_font(BODY, "", 9)
     pdf.set_text_color(*MUTE)
-    for rline in ("First Floor, 499 Union Street,", "Aberdeen, AB11 6DB", "01224 042961", "info@a2zaccounting.co.uk", "VAT No: 435116127"):
+    for rline in ("First Floor", "499 Union Street", "Aberdeen", "AB11 6DB", "01224 042961", "info@a2zaccounting.co.uk", "VAT No: 435116127"):
         pdf.set_xy(fx, ry)
         pdf.cell(72, 4.8, rline)
         ry += 4.8
