@@ -157,7 +157,10 @@ def cover(p, company, subtitle, date, ref, prepared_by="Shabbir Rahman FCCA"):
     p.f("Cormorant","B",49,WHITE); p.set_xy(23,105)
     p.cell(0,18,"Proposal of",new_x=XPos.LEFT,new_y=YPos.NEXT); p.set_x(23); p.cell(0,18,"Services")
     p.f("Nunito","",8,A9BBD0); p.set_xy(24,164); p.cell(0,5," ".join("PREPARED EXCLUSIVELY FOR"),new_x=XPos.LEFT,new_y=YPos.NEXT)
-    p.f("Cormorant","B",25,WHITE); p.set_xy(24,170); p.cell(0,12,company,new_x=XPos.LEFT,new_y=YPos.NEXT)
+    p.f("Cormorant","B",25,WHITE); p.set_xy(24,170)
+    _csz=25
+    while _csz>13 and p.get_string_width(company)>160: _csz-=0.5; p.set_font("Cormorant","B",_csz)
+    p.cell(0,12,company,new_x=XPos.LEFT,new_y=YPos.NEXT)
     p.f("Nunito","",9.5,(150,170,194)); p.set_x(24); p.cell(0,6,subtitle)
     # meta strip
     p.set_draw_color(56,84,114); p.set_line_width(0.3); p.line(24,250,186,250)
@@ -898,17 +901,31 @@ def build_ltd(wb, out, include_tiers=True, ref=None):
         p.set_y(y+h)
     p.ln(2); p.f("Nunito","",8.3,MUTED); p.set_x(p.X0)
     p.multi_cell(p.CW,4.4,"Your fee is fixed. It only changes if the scope of work changes materially, and is never billed by the hour or by surprise.",align="L",new_x=XPos.LMARGIN,new_y=YPos.NEXT)
-    if d['oneoffs']:
+    _oo=[(a,b,c) for a,b,c in d['oneoffs']] if d.get('oneoffs') else []
+    _extra=[]
+    if (num(d.get('catchup',0)) or 0)>0: _extra.append(("Catch-up / backdated work","",num(d['catchup'])))
+    for _a in (d.get('adhocs') or []):
+        if isinstance(_a,dict): _extra.append((str(_a.get('label') or "Ad-hoc"), str(_a.get('detail') or ""), num(_a.get('amount',0)) or 0))
+        else:
+            try: _extra.append((str(_a[0]), str(_a[1]) if len(_a)>1 else "", num(_a[2] if len(_a)>2 else 0) or 0))
+            except Exception: pass
+    _oo=_oo+_extra
+    if _oo:
+        if _extra:
+            _os=sum((c or 0) for a,b,c in _oo); _ov=_os*0.2; _og=_os*1.2
+        else:
+            _os=d.get('osub',0); _ov=d.get('ovat',0); _og=d.get('ogross',0)
         p.ln(3); p.need(26); p.f("Cormorant","B",13,NAVY); p.cell(0,7,"One-off, on starting",new_x=XPos.LMARGIN,new_y=YPos.NEXT); p.ln(1)
-        fee_table(p,[(a,b,c) for a,b,c in d['oneoffs']],unit="£")
-        total_row(p,"One-off subtotal",d['osub']); total_row(p,"VAT @ 20%",d['ovat']); total_row(p,"One-off inc VAT",d['ogross'],grand=True)
-    if d['notes']:
+        fee_table(p,_oo,unit="£")
+        total_row(p,"One-off subtotal",_os); total_row(p,"VAT @ 20%",_ov); total_row(p,"One-off inc VAT",_og,grand=True)
+    _cnote=(d.get('client_notes') or '').strip() or (d.get('notes') or '').strip()
+    if _cnote:
         p.ln(3); bw=p.CW-11; lh=4.6
-        p.set_font("Nunito","",9.3); nl=p.multi_cell(bw,lh,d['notes'],dry_run=True,output="LINES")
+        p.set_font("Nunito","",9.3); nl=p.multi_cell(bw,lh,_cnote,dry_run=True,output="LINES")
         h=8.6+max(len(nl),1)*lh+2; p.need(h+2); y=p.get_y()
         p.rrect(p.X0,y,p.CW,h, r=2.2, fill=PALE, draw=PALE, style="F")
         p.f("Cormorant","B",13,NAVY); p.set_xy(p.X0+6,y+2.6); p.cell(0,6,"A note on your engagement")
-        p.f("Nunito","",9.3,(39,50,59)); p.set_xy(p.X0+6,y+8.8); p.multi_cell(bw,lh,d['notes'],align="L")
+        p.f("Nunito","",9.3,(39,50,59)); p.set_xy(p.X0+6,y+8.8); p.multi_cell(bw,lh,_cnote,align="L")
         p.set_y(y+h+2)
     reg_support_page(p, d)
     mgmt_accounts_page(p, d)
