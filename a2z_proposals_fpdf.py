@@ -311,7 +311,7 @@ FORMS={'LTD':{'onboard':("company onboarding form","https://a2zaccounting.co.uk/
               'reg':("limited company registration form","https://a2zaccounting.co.uk/limited-company-registration-form/")},
        'SA':{'onboard':("sole-trader onboarding form","https://a2zaccounting.co.uk/sole-trader-onboarding/"),
              'reg':("personal tax registration form","https://a2zaccounting.co.uk/personal-tax-registration/")}}
-# Registration form links — EASILY CORRECTABLE. NOTE: the 'company' link is a suspected duplicate of the
+# Registration form links - EASILY CORRECTABLE. NOTE: the 'company' link is a suspected duplicate of the
 # sole-trader/personal-tax URL; replace it here when the correct company-registration form is confirmed.
 REG_LINKS={
  'company':("Company onboarding form","https://a2zaccounting.co.uk/company-on-boarding-form/"),
@@ -441,16 +441,16 @@ def tiers_page(p, has_cis=False, has_contractor=False, assigned="", company="thi
     REPORTS_3=[("1","Financial Health","T1"),("2","Business Performance","T2"),("3","Strategic Advisory","T3")]
     t1_items=(["Year-end accounts & partnership tax return (SA800)","Partners' self-assessment returns","Basic payroll for the partners on fixed monthly wages","HMRC deadline monitoring","Same-day email support"] if partnership else ["Year-end accounts & Corporation Tax","Confirmation statement filed","Companies House filing fee covered","Basic payroll for up to two owners on fixed monthly wages","HMRC deadline monitoring","Same-day email support"])
     tiers=[
-        dict(name="Tier 1 Compliance", price="\u00a3105\u2013\u00a3200", badge="", style="plain",
+        dict(name="Tier 1 Compliance", price="\u00a3105-\u00a3200", badge="", style="plain",
              who="Clean, accurate, on-time compliance.", base="", turnover="Turnover up to \u00a390k",
              items=t1_items,
              reports=[]),
-        dict(name="Tier 2 Growth", price="\u00a3250\u2013\u00a3500", badge="", style="plain",
-             who="Stay in control as you grow.", base="Everything in Tier 1, plus", turnover="Turnover \u00a390k\u2013\u00a3299k",
+        dict(name="Tier 2 Growth", price="\u00a3250-\u00a3500", badge="", style="plain",
+             who="Stay in control as you grow.", base="Everything in Tier 1, plus", turnover="Turnover \u00a390k-\u00a3299k",
              items=["Quarterly bookkeeping & VAT under MTD","Cloud accounting: QuickBooks + Dext","Payroll for your team"],
              reports=REPORTS_2),
-        dict(name="Tier 3 Strategic", price="\u00a3500\u2013\u00a33,500+", badge="", style="plain",
-             who="A full finance function behind you.", base="Everything in Tier 2, plus", turnover="Turnover \u00a3300k\u2013\u00a35m",
+        dict(name="Tier 3 Strategic", price="\u00a3500-\u00a33,500+", badge="", style="plain",
+             who="A full finance function behind you.", base="Everything in Tier 2, plus", turnover="Turnover \u00a3300k-\u00a35m",
              items=["Proactive tax planning & profit extraction","Dedicated manager and reviews through the year"],
              reports=REPORTS_3),
     ]
@@ -1122,7 +1122,7 @@ def build_email(d, kind):
     keys={r.get('key') for r in regs}
 
     L=[f"Hi {name},","",
-       (f"Thank you for the opportunity to look after {company} \u2014 it's a pleasure to put this proposal "
+       (f"Thank you for the opportunity to look after {company} - it's a pleasure to put this proposal "
         f"together for you. I've attached the full proposal, and here's a quick summary."),"",
        "What we'd take care of for you:"]
     L+=[f"\u2022 {x}" for x in (svc or ["the services we discussed"])]
@@ -1130,16 +1130,16 @@ def build_email(d, kind):
 
     # ---- monthly/role lines ----
     if K=='LTD':
-        L+=[f"Your fee would be {gbp(d.get('sub',0))} + VAT a month \u2014 a single fixed amount, with no surprise bills along the way."]
+        L+=[f"Your fee would be {gbp(d.get('sub',0))} + VAT a month - a single fixed amount, with no surprise bills along the way."]
         if (num(d.get('discount',0)) or 0)>0:
             L+=[f"As an exceptional act of discretion, a goodwill discount of {gbp(d['discount'])} + VAT per month has been applied. Your fee above already reflects this."]
         nd=int(num(d.get('directors',0)) or 0)
         if nd==1:
             L+=["Each director's personal tax return (self-assessment) is \u00a3120 + VAT a year, billed separately."]
         elif nd>1:
-            L+=[f"Each director's personal tax return (self-assessment) is \u00a3120 + VAT a year, billed separately \u2014 for {nd} directors that comes to {gbp(nd*120)} + VAT a year."]
+            L+=[f"Each director's personal tax return (self-assessment) is \u00a3120 + VAT a year, billed separately - for {nd} directors that comes to {gbp(nd*120)} + VAT a year."]
     elif K=='PARTNERSHIP':
-        L+=[f"Your fee would be {gbp(d.get('sub',0))} + VAT a month \u2014 a single fixed amount covering the partnership itself, with no surprise bills along the way."]
+        L+=[f"Your fee would be {gbp(d.get('sub',0))} + VAT a month - a single fixed amount covering the partnership itself, with no surprise bills along the way."]
         if (num(d.get('discount',0)) or 0)>0:
             L+=[f"As an exceptional act of discretion, a goodwill discount of {gbp(d['discount'])} + VAT per month has been applied. Your fee above already reflects this."]
         item=str(d.get('partner_sa_itemised') or '').strip()
@@ -1147,8 +1147,8 @@ def build_email(d, kind):
             L+=[f"Each partner's personal tax return (self-assessment) is billed separately: {item}."]
     else:
         m=num(d.get('monthly',0)) or 0; a=num(d.get('annual',0)) or 0
-        if m>0:   L+=[f"Your fee would be {gbp(d['monthly'])} + VAT a month \u2014 a single fixed amount, with no surprise bills along the way."]
-        elif a>0: L+=[f"Your fee would be {gbp(d['annual'])} + VAT a year \u2014 a single fixed amount, with no surprise bills along the way."]
+        if m>0:   L+=[f"Your fee would be {gbp(d['monthly'])} + VAT a month - a single fixed amount, with no surprise bills along the way."]
+        elif a>0: L+=[f"Your fee would be {gbp(d['annual'])} + VAT a year - a single fixed amount, with no surprise bills along the way."]
         else:     L+=["Your fee is set out in the attached proposal."]
         _da=num(d.get('discount_annual',0)) or 0; _dm=num(d.get('discount_monthly',0)) or 0
         if _da>0 or _dm>0:
@@ -1164,9 +1164,9 @@ def build_email(d, kind):
         reg_lines=[]
         for r in regs:
             fee=num(r.get('fee')) or 0
-            if r.get('included'): reg_lines.append(f"{r['label']} \u2014 included")
-            elif fee>0:          reg_lines.append(f"{r['label']} \u2014 {gbp(fee)} + VAT (one-off)")
-            else:                reg_lines.append(f"{r['label']} \u2014 one-off")
+            if r.get('included'): reg_lines.append(f"{r['label']} - included")
+            elif fee>0:          reg_lines.append(f"{r['label']} - {gbp(fee)} + VAT (one-off)")
+            else:                reg_lines.append(f"{r['label']} - one-off")
         if reg_lines:
             L+=["","We'd also handle these one-off registrations for you, as your authorised agent:"]
             L+=[f"\u2022 {x}" for x in reg_lines]
@@ -1218,12 +1218,12 @@ def build_email(d, kind):
         fm=r.get('form')
         if fm and fm[1] not in seen: extra.append(fm); seen.add(fm[1])
     if extra:
-        L+=["","We'd also take care of a couple of registrations for you \u2014 you can complete those here as well:"]
+        L+=["","We'd also take care of a couple of registrations for you - you can complete those here as well:"]
         for nm_,u in extra:
             lab=nm_[:-5] if nm_.lower().endswith(" form") else nm_
             L+=[f"{lab}: {u}"]
     L+=["",
-        "If you have any questions, or would like to talk anything through, just let me know \u2014 I'd be glad to help."]
+        "If you have any questions, or would like to talk anything through, just let me know - I'd be glad to help."]
     return subject, "\n".join(L)
 def safe_load_workbook(path):
     """Copy to a temp file first, so a workbook open in Excel or stored online-only still opens."""
@@ -1326,7 +1326,7 @@ def build_internal(wb, kind, out, ref=None):
         p.f("Nunito","",8,MUTED); p.set_xy(X0+CW-34,ys+1.5); p.cell(34,3.6,((str(len(items))+(" item" if len(items)==1 else " items")) if items else "no items"),align="R")
         p.set_y(ys+6.4); p.hline(SOFTLINE); p.ln(1.6)
         if not items:
-            p.f("Nunito","",8.6,GREY); p.set_x(X0+5.5); p.cell(0,4.6,"\u2013  nothing assigned to this team for this client",new_x=XPos.LMARGIN,new_y=YPos.NEXT); p.ln(2.2); continue
+            p.f("Nunito","",8.6,GREY); p.set_x(X0+5.5); p.cell(0,4.6,"-  nothing assigned to this team for this client",new_x=XPos.LMARGIN,new_y=YPos.NEXT); p.ln(2.2); continue
         for it in items:
             p.need(10); y0=p.get_y(); rightw=36
             p.f("NunitoSemi","",9.3,NAVY); p.set_xy(X0+5.5,y0); p.cell(4,5,"\u2022"); p.cell(CW-9.5-rightw,5,str(it['label']))
@@ -1527,7 +1527,7 @@ def run_gui():
                 root.clipboard_clear(); root.clipboard_append(full); root.update()
             except Exception: pass
             messagebox.showinfo("Proposal ready",
-                "Your files are in this folder.\n\nThe email has been copied to your clipboard \u2014 paste it into Outlook and attach the proposal PDF.\n\n"+full)
+                "Your files are in this folder.\n\nThe email has been copied to your clipboard - paste it into Outlook and attach the proposal PDF.\n\n"+full)
 
     def _render_result(d, full):
         centre(640,690); clear()
@@ -1543,7 +1543,7 @@ def run_gui():
         def copy_email():
             try:
                 root.clipboard_clear(); root.clipboard_append(full); root.update()
-                msg.set("Email copied to clipboard \u2713   \u2014   paste into Outlook (Ctrl+V)")
+                msg.set("Email copied to clipboard \u2713   -   paste into Outlook (Ctrl+V)")
             except Exception:
                 msg.set("Select the text below and press Ctrl+C.")
 
@@ -1555,7 +1555,7 @@ def run_gui():
         btn(bar,"Open folder",lambda:_open(HERE_)).pack(side="left")
         btn(bar,"Build another",show_home).pack(side="right")
 
-        tk.Label(f,text="Your email \u2014 ready to paste into Outlook (attach the proposal PDF):",
+        tk.Label(f,text="Your email - ready to paste into Outlook (attach the proposal PDF):",
                  bg=PAPER,fg=INKX,font=("Segoe UI",10,"bold")).pack(anchor="w",pady=(2,4))
         wrap=tk.Frame(f,bg=HAIR); wrap.pack(fill="both",expand=True)
         sb=tk.Scrollbar(wrap); sb.pack(side="right",fill="y")
@@ -1566,7 +1566,7 @@ def run_gui():
         # auto-copy so it's ready to paste straight away
         try:
             root.clipboard_clear(); root.clipboard_append(full); root.update()
-            msg.set("Email copied to clipboard \u2713   \u2014   paste into Outlook (Ctrl+V)")
+            msg.set("Email copied to clipboard \u2713   -   paste into Outlook (Ctrl+V)")
         except Exception:
             pass
 
