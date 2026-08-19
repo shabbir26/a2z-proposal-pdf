@@ -73,8 +73,8 @@ def _fill_ltd_sheet(ws, d):
     _set(ws, "C25", int(_num(d.get("directors"))))
     _set(ws, "C35", int(_num(d.get("people"))))
     _set(ws, "K4", _num(d.get("discount")))
-    _set(ws, "B72", d.get("notes") or "")
-    _set(ws, "I10", d.get("internal_notes") or "")
+    _set(ws, "B72", d.get("client_notes") or "")
+    _set(ws, "I10", d.get("internal_notes") or d.get("notes") or "")
     _set(ws, "J25", d.get("source") or "")
     _set(ws, "J26", d.get("referrer") or "")
 
@@ -112,15 +112,27 @@ def _fill_ltd_sheet(ws, d):
     _set(ws, "G45", _num(d.get("vat")))
     _set(ws, "G46", _num(d.get("gross")))
 
-    # one-offs rows 50-57 (B desc, D detail, E when, F price, G note)
-    for i, o in enumerate(d.get("oneoffs", [])[:8]):
+    # one-offs rows 50-57 - fold in catch-up and ad-hoc so they print
+    _oo = list(d.get("oneoffs", []))
+    _cu = _num(d.get("catchup"))
+    if _cu > 0:
+        _oo.append({"label": "Catch-up / backdated work", "detail": "", "amount": _cu})
+    _ad = 0.0
+    for _a in (d.get("adhocs") or []):
+        if isinstance(_a, dict):
+            _amt = _num(_a.get("amount"))
+            if _amt or _a.get("label"):
+                _oo.append({"label": _a.get("label") or "Ad-hoc", "detail": _a.get("detail") or "", "amount": _amt})
+                _ad += _amt
+    for i, o in enumerate(_oo[:8]):
         r = 50 + i
         _set(ws, "B%d" % r, o.get("label") or "")
         _set(ws, "D%d" % r, o.get("detail") or "")
         _set(ws, "F%d" % r, _num(o.get("amount")))
-    _set(ws, "F67", _num(d.get("osub")))
-    _set(ws, "F68", _num(d.get("ovat")))
-    _set(ws, "F69", _num(d.get("ogross")))
+    _osub = _num(d.get("osub")) + _cu + _ad
+    _set(ws, "F67", _osub)
+    _set(ws, "F68", _osub * 0.2)
+    _set(ws, "F69", _osub * 1.2)
 
     # setup/registration rows 60-66 (C=Required flag, F=fee)
     regs = d.get("registrations", {})
@@ -166,7 +178,7 @@ def _fill_sa_sheet(ws, d):
     _set(ws, "C15", d.get("freq") or "Annually")
     _set(ws, "J30", d.get("source") or "")
     _set(ws, "J31", d.get("referrer") or "")
-    _set(ws, "B60", d.get("notes") or "")
+    _set(ws, "B60", d.get("client_notes") or "")
 
     # service lines - his read_sa reads 7 fixed rows (26-32); the platform's SA proposal is
     # a package + optional extras, so map by service name into the right fixed row.
@@ -189,14 +201,26 @@ def _fill_sa_sheet(ws, d):
     _set(ws, "H34", _num(d.get("discount_annual")))
     _set(ws, "H35", _num(d.get("discount_monthly")))
 
-    # one-offs rows 40-47 (B desc, E price)
-    for i, o in enumerate(d.get("oneoffs", [])[:8]):
+    # one-offs rows 40-47 - fold in catch-up and ad-hoc so they print
+    _oo = list(d.get("oneoffs", []))
+    _cu = _num(d.get("catchup"))
+    if _cu > 0:
+        _oo.append({"label": "Catch-up / backdated work", "detail": "", "amount": _cu})
+    _ad = 0.0
+    for _a in (d.get("adhocs") or []):
+        if isinstance(_a, dict):
+            _amt = _num(_a.get("amount"))
+            if _amt or _a.get("label"):
+                _oo.append({"label": _a.get("label") or "Ad-hoc", "detail": _a.get("detail") or "", "amount": _amt})
+                _ad += _amt
+    for i, o in enumerate(_oo[:8]):
         r = 40 + i
         _set(ws, "B%d" % r, o.get("label") or "")
         _set(ws, "E%d" % r, _num(o.get("amount")))
-    _set(ws, "E55", _num(d.get("osub")))
-    _set(ws, "E56", _num(d.get("ovat")))
-    _set(ws, "E57", _num(d.get("ogross")))
+    _osub = _num(d.get("osub")) + _cu + _ad
+    _set(ws, "E55", _osub)
+    _set(ws, "E56", _osub * 0.2)
+    _set(ws, "E57", _osub * 1.2)
 
     # registration block rows 49-54 (C=Required, E=fee): sa/paye/vat/cis_sub/cis_con/other
     regs = d.get("registrations", {})
