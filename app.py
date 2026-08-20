@@ -950,6 +950,22 @@ def send():
             print("=== END ERROR ===", flush=True)
             return jsonify(error="Could not build the PDF attachment", detail=str(e)), 500
 
+    # optional engagement PDF attachment (mirrors attach_proposal; additive)
+    if d.get("attach_engagement") and d.get("engagement"):
+        try:
+            pdf = _engagement_pdf_bytes_for(d["engagement"])
+            name = d.get("attachment_name") or ((d["engagement"].get("company") or "Engagement") + " - engagement.pdf")
+            message.setdefault("attachments", []).append({
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": name,
+                "contentType": "application/pdf",
+                "contentBytes": _b64.b64encode(pdf).decode("ascii"),
+            })
+        except Exception as e:
+            print("=== SEND: ENGAGEMENT ATTACHMENT BUILD ERROR ===", flush=True)
+            traceback.print_exc()
+            return jsonify(error="Could not build the engagement attachment", detail=str(e)), 500
+
     # optional invoice PDF attachment (added Aug 2026)
     if d.get("attach_invoice") and d.get("invoice"):
         try:
