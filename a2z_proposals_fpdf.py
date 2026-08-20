@@ -1699,6 +1699,7 @@ def _degen(s):
     for b,g in _BRANDS: s=s.replace(b,g)
     s=s.replace("Document software (document capture software)","Document capture software")
     s=s.replace("Bookkeeping software","Cloud accounting software")
+    if s.startswith("cloud "): s="C"+s[1:]
     return s
 
 def _accounts_label(form):
@@ -1754,42 +1755,44 @@ def cover_engagement(p, company, subtitle, date, ref, lead_name="A2Z Accounting 
     p.set_auto_page_break(True, margin=20)
 
 def engagement_accept(p, company, form, signatory, acceptance=None, ref="", version="v1", sec_no=99):
-    sig_name=(signatory or {}).get("name") or "A2Z Accounting Solutions"
-    sig_title=(signatory or {}).get("title") or "for and on behalf of A2Z Accounting Solutions Ltd"
-    _esec(p, sec_no, "Acceptance", "Accepting this agreement")
-    _eng_para(p, f"This agreement is accepted electronically. Selecting **I agree** is a deliberate act of acceptance and creates a binding engagement between you and A2Z Accounting Solutions Ltd, in the same way as a signature. The person accepting confirms that they are authorised to accept it on behalf of {company}.")
-    _eng_para(p, "At the moment of acceptance we record the name and stated position of the person accepting, the exact date and time, the device network address, and the version and reference of this agreement. The confirmation below is your evidence of exactly what was agreed - the services, frequencies and fees set out above - at that moment.")
+    sig_name=(signatory or {}).get("name") or "A2Z Accounting Solutions Ltd"
+    sig_title=(signatory or {}).get("title") or "Director, for and on behalf of the firm"
+    _esec(p, sec_no, "Signature & acceptance", "How this agreement is signed", reserve=40)
+    _eng_para(p, f"This agreement is signed and accepted **electronically**. Selecting **I agree** on the secure link we send you is a deliberate act of acceptance and creates a binding engagement between {company} and A2Z Accounting Solutions Ltd, in the same way as a handwritten signature. The person accepting confirms they are authorised to accept it on behalf of {form['entity_the']}.")
+    _eng_para(p, "The signature block below is completed at the moment of acceptance. We record the name and stated position of the person accepting, the exact date and time, the device network address (IP), and the version and reference of this agreement - your evidence of exactly what was agreed.")
+    p.need(54); y0=p.get_y(); gap=8; colw=(p.CW-gap)/2; h=47
+    cols=[(p.X0,"ACCEPTED BY THE CLIENT",bool(acceptance)),(p.X0+colw+gap,"FOR A2Z ACCOUNTING SOLUTIONS LTD",True)]
+    for cx,ctitle,done in cols:
+        p.rrect(cx,y0,colw,h,r=2.2,draw=LINE,style="D")
+        p.set_fill_color(*(GREEN if done else (206,214,222))); p.rect(cx,y0,colw,1.8,style="F")
+        p.f("Nunito","B",7,GREEN if done else MUTED); p.set_xy(cx+7,y0+5.5); p.cell(0,4," ".join(ctitle))
+    def field(cx,ln,label,val,filled):
+        yy=y0+12.5+ln*10.5
+        p.f("Nunito","",6.6,MUTED); p.set_xy(cx+7,yy); p.cell(0,3.4," ".join(label.upper()))
+        p.f("NunitoSemi","",9.3,(39,50,59) if filled else (176,185,194)); p.set_xy(cx+7,yy+3.8)
+        p.multi_cell(colw-14,4.4,val,align="L")
+        p.set_draw_color(*SOFTLINE); p.set_line_width(0.2); p.line(cx+7,yy+9.6,cx+colw-7,yy+9.6)
     if acceptance:
-        p.need(68); y=p.get_y(); h=52
-        p.rrect(p.X0,y,p.CW,h,r=2.5,fill=NAVY,draw=NAVY,style="DF")
-        p.set_fill_color(*GREEN); p.rect(p.X0,y,p.CW,2.2,style="F")
-        p.f("NunitoSemi","",7.5,(169,187,208)); p.set_xy(p.X0+9,y+7.5); p.cell(0,4," ".join("ACCEPTED & CONFIRMED"))
-        p.f("Cormorant","B",15,WHITE); p.set_xy(p.X0+9,y+11.5); p.cell(0,7,f"Agreed on behalf of {company}")
-        who=acceptance.get("name") or "the client"
-        pos=acceptance.get("position") or ""
-        when=acceptance.get("when") or ""
-        body=f"Accepted by **{who}**" + (f" ({pos})" if pos else "") + f", who confirmed authority to bind {form['entity_the']}."
-        if when: body+=f"\nDate and time: **{when}**"
-        line2=[]
-        if acceptance.get("ip"): line2.append("IP "+str(acceptance.get("ip")))
-        if ref: line2.append("Reference "+str(ref))
-        if version: line2.append("Version "+str(version))
-        if line2: body+="\n"+"  \u00b7  ".join(line2)
-        p.f("Nunito","",9,(210,221,232)); p.set_xy(p.X0+9,y+20)
-        p.multi_cell(p.CW-18,4.7,body,align="L",markdown=True)
-        p.set_y(y+h+6)
+        field(p.X0,0,"Name",acceptance.get("name") or "-",True)
+        field(p.X0,1,"Position",acceptance.get("position") or "-",True)
+        field(p.X0,2,"Date and time",acceptance.get("when") or "-",True)
     else:
-        p.need(50); y=p.get_y(); h=34
-        p.rrect(p.X0,y,p.CW,h,r=2.5,fill=NAVY,draw=NAVY,style="DF")
-        p.set_fill_color(*GREEN); p.rect(p.X0,y,p.CW,2.2,style="F")
-        p.f("NunitoSemi","",7.5,(169,187,208)); p.set_xy(p.X0+9,y+8); p.cell(0,4," ".join("TO ACCEPT"))
-        p.f("Cormorant","B",15,WHITE); p.set_xy(p.X0+9,y+12.5); p.cell(0,7,"Confirm your engagement online")
-        p.f("Nunito","",9,(210,221,232)); p.set_xy(p.X0+9,y+20); p.multi_cell(p.CW-18,4.5,"Open the secure link we email you, review this agreement, enter your name and position, confirm you are authorised to accept, and select I agree.",align="L")
-        p.set_y(y+h+6)
-    p.f("Nunito","B",8.6,NAVY); p.set_x(p.X0); p.cell(p.CW/2,4,"For A2Z Accounting Solutions Ltd")
-    p.cell(p.CW/2,4,"01224 042961",align="R",new_x=XPos.LMARGIN,new_y=YPos.NEXT)
-    p.f("Nunito","",8.6,GREY); p.cell(p.CW/2,4,f"{sig_name}  \u00b7  {sig_title}" if (signatory or {}).get("name") else "A named FCCA director")
-    p.cell(p.CW/2,4,"info@a2zaccounting.co.uk",align="R")
+        for i,l in enumerate(["Name","Position","Date and time"]): field(p.X0,i,l,"Completed on acceptance",False)
+    ax=p.X0+colw+gap
+    field(ax,0,"Signatory",sig_name,True)
+    field(ax,1,"Title",sig_title,True)
+    field(ax,2,"Date",(acceptance.get("when") if acceptance else "On acceptance"),bool(acceptance))
+    p.set_y(y0+h+4)
+    if acceptance:
+        ev=[]
+        if acceptance.get("ip"): ev.append("IP "+str(acceptance.get("ip")))
+        if ref: ev.append("Ref "+str(ref))
+        if version: ev.append("Version "+str(version))
+        ev.append("accepted electronically, authority to bind confirmed")
+        p.f("Nunito","",8,MUTED); p.set_x(p.X0); p.multi_cell(p.CW,4.3,"Signature evidence:  "+"  \u00b7  ".join(ev),align="L")
+    else:
+        p.f("Nunito","",8,MUTED); p.set_x(p.X0); p.multi_cell(p.CW,4.3,"Not yet accepted - the client completes the left-hand block via the secure link we send, which records the date, time and IP as the electronic signature.",align="L")
+    p.ln(1)
 
 class EngagementPDF(PDF):
     def header(self):
@@ -1809,13 +1812,13 @@ class EngagementPDF(PDF):
         self.set_x(self.X0); self.cell(self.CW/2,4,"A2Z Accounting Solutions  \u00b7  Regulated by ACCA")
         self.cell(self.CW/2,4,f"Page {self.page_no()} of {{nb}}",align="R")
 
-def _esec(p, n, klab, title):
-    p.ln(3.0); p.need(22)
-    p.f("Nunito","B",7.5,GREEN); p.set_x(p.X0); p.cell(0,4," ".join(klab.upper()),new_x=XPos.LMARGIN,new_y=YPos.NEXT); p.ln(1.2)
-    p.f("Cormorant","B",15.5,NAVY); p.set_x(p.X0)
+def _esec(p, n, klab, title, reserve=24):
+    p.ln(3.2); p.need(reserve)
+    p.f("Nunito","B",7.5,GREEN); p.set_x(p.X0); p.cell(0,4," ".join(klab.upper()),new_x=XPos.LMARGIN,new_y=YPos.NEXT); p.ln(1.4)
+    p.f("Cormorant","B",15.5,GREEN); p.set_x(p.X0)
     p.cell(8.5,7,f"{n}.",new_x=XPos.RIGHT,new_y=YPos.TOP)
-    p.multi_cell(p.CW-8.5,7,title,new_x=XPos.LMARGIN,new_y=YPos.NEXT)
-    _yr=p.get_y()+0.6; p.set_draw_color(*GREEN); p.set_line_width(0.6); p.line(p.X0,_yr,p.X0+15,_yr); p.ln(2.6)
+    p.f("Cormorant","B",15.5,NAVY)
+    p.multi_cell(p.CW-8.5,7,title,new_x=XPos.LMARGIN,new_y=YPos.NEXT); p.ln(2.3)
 
 def _eng_note(p, text):
     p.ln(1); p.need(14); y=p.get_y()
@@ -1867,7 +1870,7 @@ def build_engagement(wb, out, ref=None, acceptance=None, eng=None):
     else:
         _n=3
 
-    _esec(p,_n,"The fees","Your fees"); _fee_n=_n
+    _esec(p,_n,"The fees","Your fees", reserve=58); _fee_n=_n
     p.need(31); y=p.get_y(); bh=25; p.rrect(p.X0,y,p.CW,bh,fill=NAVY,style="F")
     p.f("Nunito","B",7.5,A9BBD0); p.set_xy(p.X0+8,y+5.5); p.cell(0,4," ".join("YOUR PROFESSIONAL FEE"))
     p.f("Cormorant","B",16,WHITE); p.set_xy(p.X0+8,y+10.5); p.cell(0,8,"Your finance function")
