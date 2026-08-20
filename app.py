@@ -1009,6 +1009,37 @@ def send():
     return jsonify(error="Microsoft 365 rejected the send", status=r.status_code, detail=r.text[:500]), 502
 
 
+# ---- Engagement agreement PDF (added; reuses _build_workbook_ltd + GEN; nothing else changed) ----
+def _engagement_pdf_bytes_for(d):
+    """Build the engagement PDF and return raw bytes (for /send attachments used by the accept flow)."""
+    tmpdir = tempfile.mkdtemp()
+    wb_path = os.path.join(tmpdir, "wb.xlsx"); out_path = os.path.join(tmpdir, "engagement.pdf")
+    wb = _build_workbook_ltd(d); wb.save(wb_path)
+    wb2 = GEN.safe_load_workbook(wb_path)
+    GEN.build_engagement(wb2, out_path, ref=d.get("ref"), acceptance=d.get("acceptance"), eng=d)
+    with open(out_path, "rb") as f:
+        return f.read()
+
+
+@app.route("/engagement", methods=["POST", "OPTIONS"])
+def engagement():
+    if request.method == "OPTIONS":
+        return ("", 204)
+    d = request.get_json(force=True, silent=True) or {}
+    tmpdir = tempfile.mkdtemp()
+    wb_path = os.path.join(tmpdir, "wb.xlsx"); out_path = os.path.join(tmpdir, "engagement.pdf")
+    try:
+        wb = _build_workbook_ltd(d); wb.save(wb_path)
+        wb2 = GEN.safe_load_workbook(wb_path)
+        GEN.build_engagement(wb2, out_path, ref=d.get("ref"), acceptance=d.get("acceptance"), eng=d)
+    except Exception as e:
+        print("=== ENGAGEMENT PDF BUILD ERROR ===", flush=True); traceback.print_exc()
+        return jsonify(error="Engagement PDF build failed", detail=str(e)), 500
+    fname = (d.get("company") or "Engagement").replace("/", " ").replace("\\", " ")
+    fname = " ".join(fname.split()) + " - engagement.pdf"
+    return send_file(out_path, mimetype="application/pdf", as_attachment=True, download_name=fname)
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port)

@@ -1599,3 +1599,400 @@ if __name__=='__main__':
     except Exception as ex:
         import traceback; print("\nCouldn't build the proposal:\n  ", ex); traceback.print_exc()
     input("\nPress Enter to close...")
+
+
+
+
+# ================= UNIVERSAL ENGAGEMENT AGREEMENT (dynamic, legal-form aware) =================
+def _eng_para(p, text, col=(39,50,59), w=None, lh=5.0, justify=True):
+    w = w or p.CW
+    p.f("Nunito","",9.5,col); p.set_x(p.X0)
+    p.multi_cell(w,lh,text,align=("J" if justify else "L"),new_x=XPos.LMARGIN,new_y=YPos.NEXT,markdown=True); p.ln(1.8)
+
+def _eng_sublabel(p, t):
+    p.f("Nunito","B",7.5,GREEN); p.set_x(p.X0)
+    p.cell(0,4," ".join(t.upper()),new_x=XPos.LMARGIN,new_y=YPos.NEXT); p.ln(1.6)
+
+def _eng_ticklist(p, items, lh=4.6):
+    for it in items:
+        p.set_font("Nunito","",9.3)
+        lines = p.multi_cell(p.CW-7,lh,it,dry_run=True,output="LINES",markdown=True)
+        h = max(len(lines),1)*lh
+        p.need(h+1.5); y0=p.get_y(); p.tick(p.X0, y0+0.6, 2.8)
+        p.f("Nunito","",9.3,(39,50,59)); p.set_xy(p.X0+7,y0)
+        p.multi_cell(p.CW-7,lh,it,align="L",new_x=XPos.LMARGIN,new_y=YPos.NEXT,markdown=True)
+        p.set_y(y0+h+0.9); p.hline(SOFTLINE); p.ln(0.9)
+
+_ENG_BASE = dict(entity="organisation", entity_the="the organisation", officer_word="responsible officer",
+                 officer_plural="responsible officers", officers="the responsible officers",
+                 authorities="HMRC", has_number=False, number_label="registration number", ch=False)
+def _eng_form(lf):
+    lf = (lf or "").strip().lower().replace(" ", "_").replace("-", "_")
+    A = {
+      "sole_trader": dict(entity="business", entity_the="the business", officer_word="proprietor",
+          officer_plural="proprietors", officers="you as the business owner", authorities="HMRC",
+          has_number=False, number_label=None, ch=False),
+      "ltd": dict(entity="company", entity_the="the company", officer_word="director",
+          officer_plural="directors", officers="the directors", authorities="Companies House and HMRC",
+          has_number=True, number_label="company number", ch=True),
+      "cic": dict(entity="community interest company (CIC)", entity_the="the company", officer_word="director",
+          officer_plural="directors", officers="the directors", authorities="Companies House, the CIC Regulator and HMRC",
+          has_number=True, number_label="company number", ch=True),
+      "charitable_company": dict(entity="charitable company", entity_the="the company",
+          officer_word="director and charity trustee", officer_plural="directors and charity trustees",
+          officers="the directors and charity trustees", authorities="Companies House, the charity regulator and HMRC",
+          has_number=True, number_label="company number", ch=True),
+      "llp": dict(entity="limited liability partnership (LLP)", entity_the="the LLP", officer_word="member",
+          officer_plural="members", officers="the members", authorities="Companies House and HMRC",
+          has_number=True, number_label="LLP number", ch=True),
+      "partnership": dict(entity="partnership", entity_the="the partnership", officer_word="partner",
+          officer_plural="partners", officers="the partners", authorities="HMRC",
+          has_number=False, number_label=None, ch=False),
+      "charity": dict(entity="charity", entity_the="the charity", officer_word="trustee",
+          officer_plural="trustees", officers="the trustees", authorities="the charity regulator and HMRC",
+          has_number=True, number_label="charity number", ch=False),
+      "scio": dict(entity="SCIO", entity_the="the SCIO", officer_word="charity trustee",
+          officer_plural="charity trustees", officers="the charity trustees", authorities="OSCR and HMRC",
+          has_number=True, number_label="Scottish charity number", ch=False),
+      "trust": dict(entity="trust", entity_the="the trust", officer_word="trustee",
+          officer_plural="trustees", officers="the trustees", authorities="HMRC",
+          has_number=False, number_label=None, ch=False),
+    }
+    A["limited"]=A["ltd"]; A["limited_company"]=A["ltd"]; A["company"]=A["ltd"]
+    A["community_interest_company"]=A["cic"]; A["partnership_general"]=A["partnership"]
+    f=dict(_ENG_BASE); f.update(A.get(lf, {})); return f
+
+def _eng_form_from_kind(kind):
+    k=(kind or "").upper()
+    return {"LTD":"ltd","CIC":"cic","CHARITY":"charity","PARTNERSHIP":"partnership","SA":"sole_trader"}.get(k,"ltd")
+
+def _eng_people_phrase(eng, form):
+    ppl = eng.get("responsible_persons") or []
+    names=[str(x.get("name","")).strip() for x in ppl if isinstance(x,dict) and x.get("name")]
+    if not names:
+        return None, form["officers"]
+    if len(names)==1:
+        return names[0], f"{form['officer_word']} {names[0]}"
+    joined=", ".join(names[:-1])+" and "+names[-1]
+    return joined, f"{form['officer_plural']} {joined}"
+
+def _eng_flags(lines):
+    L=" | ".join(str(x[0]).lower() for x in (lines or []))
+    has=lambda *ks: any(k in L for k in ks)
+    return dict(
+        accounts=has("annual accounts","accounts & corporation","corporation tax","partnership tax"),
+        sa=has("self assessment","self-assessment"),
+        vat=has("vat"),
+        payroll=has("payroll"),
+        pension=has("pension","auto-enrolment","auto enrolment"),
+        cis=has("cis"),
+        book=has("bookkeeping"),
+        cs01=has("confirmation statement","companies house","cs01"),
+        mgmt=has("financial health","business performance","strategic advisory","management report","advisory report"),
+        software=has("software","quickbooks","xero","dext"),
+        address=has("address service","registered office"),
+    )
+
+_BRANDS=[("Dext","document capture software"),("QuickBooks","cloud accounting software"),("Quickbooks","cloud accounting software"),("Xero","cloud accounting software"),("Sage","cloud accounting software"),("FreeAgent","cloud accounting software"),("Free Agent","cloud accounting software")]
+def _degen(s):
+    s=str(s)
+    for b,g in _BRANDS: s=s.replace(b,g)
+    s=s.replace("Document software (document capture software)","Document capture software")
+    s=s.replace("Bookkeeping software","Cloud accounting software")
+    return s
+
+def _accounts_label(form):
+    ow=form["officer_word"]
+    if "proprietor" in ow: return ("Annual accounts & Self Assessment","Accounts and tax return, prepared and filed to deadline")
+    if "member" in ow: return ("Annual accounts & Partnership Tax Return","LLP accounts and partnership return, filed to deadline")
+    if "partner" in ow: return ("Annual accounts & Partnership Tax Return","Accounts and partnership return, filed to deadline")
+    if "trustee" in ow: return ("Annual accounts","Charity accounts, prepared and filed to the regulator")
+    return ("Annual accounts & Corporation Tax","Statutory accounts & CT600, filed to deadline")
+
+def _eng_relabel_lines(lines, form):
+    lab,det=_accounts_label(form); out=[]
+    for l in lines:
+        L=str(l[0]); D=str(l[1]) if len(l)>1 else ""; A=l[2] if len(l)>2 else 0; low=L.lower()
+        if "annual accounts" in low or "corporation tax" in low:
+            L=lab; D=det
+        if ("companies house" in low or "confirmation statement" in low) and not form["ch"]: continue
+        if ("registered office" in low or "address service" in low) and not form["ch"]: continue
+        out.append((_degen(L),_degen(D),A))
+    return out
+
+def cover_engagement(p, company, subtitle, date, ref, lead_name="A2Z Accounting Solutions", status="For acceptance"):
+    p.add_page(); p.set_auto_page_break(False)
+    p.set_fill_color(*NAVY); p.rect(0,0,210,297,style="F")
+    p.set_fill_color(*GREEN); p.rect(0,0,210,3.2,style="F")
+    logo=os.path.join(tempfile.gettempdir(),"a2z_logo.png")
+    if LOGO_B64 and not os.path.exists(logo): open(logo,"wb").write(base64.b64decode(LOGO_B64))
+    src=logo if os.path.exists(logo) else os.path.join(HERE,"logo.png")
+    p.rrect(24,26,66,21, r=2.5, style="F", fill=WHITE, draw=WHITE)
+    try: p.image(src, x=30, y=30.5, h=12)
+    except Exception: pass
+    p.f("Nunito","",7.5,A9BBD0); p.set_xy(110,33); p.cell(76,5," ".join("PRIVATE & CONFIDENTIAL"),align="R")
+    p.set_fill_color(*GREEN); p.rect(24,98,48,1.4,style="F")
+    p.f("Cormorant","B",47,WHITE); p.set_xy(23,105)
+    p.cell(0,17,"Engagement",new_x=XPos.LEFT,new_y=YPos.NEXT); p.set_x(23); p.cell(0,17,"Agreement")
+    p.f("Nunito","",8,A9BBD0); p.set_xy(24,164); p.cell(0,5," ".join("AGREED BETWEEN A2Z AND"),new_x=XPos.LEFT,new_y=YPos.NEXT)
+    p.f("Cormorant","B",25,WHITE); p.set_xy(24,170)
+    _csz=25
+    while _csz>13 and p.get_string_width(company)>160: _csz-=0.5; p.set_font("Cormorant","B",_csz)
+    p.cell(0,12,company,new_x=XPos.LEFT,new_y=YPos.NEXT)
+    p.f("Nunito","",9.5,(150,170,194)); p.set_x(24); p.cell(0,6,subtitle)
+    p.set_draw_color(56,84,114); p.set_line_width(0.3); p.line(24,250,186,250)
+    meta=[("DATE",date),("ENGAGEMENT LEAD",lead_name or "A2Z Accounting Solutions"),("REFERENCE",ref),("STATUS",status)]
+    x=24
+    for lab,val in meta:
+        p.f("Nunito","",7,A9BBD0); p.set_xy(x,254); p.cell(40,4," ".join(lab))
+        val=str(val); sz=9.5; p.set_font("NunitoSemi","",sz)
+        while sz>6.6 and p.get_string_width(val)>37: sz-=0.4; p.set_font("NunitoSemi","",sz)
+        p.set_text_color(*WHITE); p.set_xy(x,259); p.cell(40,5,val); x+=40.5
+    p.f("Nunito","",7,A9BBD0); p.set_xy(24,268); p.cell(0,4,"Chartered Certified Accountants, regulated by ACCA.")
+    p.f("Nunito","",8,(150,170,194)); p.set_xy(24,283); p.cell(0,5,"1st Floor, 499 Union Street, Aberdeen, AB11 6DB")
+    p.set_xy(110,283); p.cell(76,5,"01224 042961  \u00b7  info@a2zaccounting.co.uk",align="R")
+    p.set_auto_page_break(True, margin=20)
+
+def engagement_accept(p, company, form, signatory, acceptance=None, ref="", version="v1", sec_no=99):
+    sig_name=(signatory or {}).get("name") or "A2Z Accounting Solutions"
+    sig_title=(signatory or {}).get("title") or "for and on behalf of A2Z Accounting Solutions Ltd"
+    _esec(p, sec_no, "Acceptance", "Accepting this agreement")
+    _eng_para(p, f"This agreement is accepted electronically. Selecting **I agree** is a deliberate act of acceptance and creates a binding engagement between you and A2Z Accounting Solutions Ltd, in the same way as a signature. The person accepting confirms that they are authorised to accept it on behalf of {company}.")
+    _eng_para(p, "At the moment of acceptance we record the name and stated position of the person accepting, the exact date and time, the device network address, and the version and reference of this agreement. The confirmation below is your evidence of exactly what was agreed - the services, frequencies and fees set out above - at that moment.")
+    if acceptance:
+        p.need(68); y=p.get_y(); h=52
+        p.rrect(p.X0,y,p.CW,h,r=2.5,fill=NAVY,draw=NAVY,style="DF")
+        p.set_fill_color(*GREEN); p.rect(p.X0,y,p.CW,2.2,style="F")
+        p.f("NunitoSemi","",7.5,(169,187,208)); p.set_xy(p.X0+9,y+7.5); p.cell(0,4," ".join("ACCEPTED & CONFIRMED"))
+        p.f("Cormorant","B",15,WHITE); p.set_xy(p.X0+9,y+11.5); p.cell(0,7,f"Agreed on behalf of {company}")
+        who=acceptance.get("name") or "the client"
+        pos=acceptance.get("position") or ""
+        when=acceptance.get("when") or ""
+        body=f"Accepted by **{who}**" + (f" ({pos})" if pos else "") + f", who confirmed authority to bind {form['entity_the']}."
+        if when: body+=f"\nDate and time: **{when}**"
+        line2=[]
+        if acceptance.get("ip"): line2.append("IP "+str(acceptance.get("ip")))
+        if ref: line2.append("Reference "+str(ref))
+        if version: line2.append("Version "+str(version))
+        if line2: body+="\n"+"  \u00b7  ".join(line2)
+        p.f("Nunito","",9,(210,221,232)); p.set_xy(p.X0+9,y+20)
+        p.multi_cell(p.CW-18,4.7,body,align="L",markdown=True)
+        p.set_y(y+h+6)
+    else:
+        p.need(50); y=p.get_y(); h=34
+        p.rrect(p.X0,y,p.CW,h,r=2.5,fill=NAVY,draw=NAVY,style="DF")
+        p.set_fill_color(*GREEN); p.rect(p.X0,y,p.CW,2.2,style="F")
+        p.f("NunitoSemi","",7.5,(169,187,208)); p.set_xy(p.X0+9,y+8); p.cell(0,4," ".join("TO ACCEPT"))
+        p.f("Cormorant","B",15,WHITE); p.set_xy(p.X0+9,y+12.5); p.cell(0,7,"Confirm your engagement online")
+        p.f("Nunito","",9,(210,221,232)); p.set_xy(p.X0+9,y+20); p.multi_cell(p.CW-18,4.5,"Open the secure link we email you, review this agreement, enter your name and position, confirm you are authorised to accept, and select I agree.",align="L")
+        p.set_y(y+h+6)
+    p.f("Nunito","B",8.6,NAVY); p.set_x(p.X0); p.cell(p.CW/2,4,"For A2Z Accounting Solutions Ltd")
+    p.cell(p.CW/2,4,"01224 042961",align="R",new_x=XPos.LMARGIN,new_y=YPos.NEXT)
+    p.f("Nunito","",8.6,GREY); p.cell(p.CW/2,4,f"{sig_name}  \u00b7  {sig_title}" if (signatory or {}).get("name") else "A named FCCA director")
+    p.cell(p.CW/2,4,"info@a2zaccounting.co.uk",align="R")
+
+class EngagementPDF(PDF):
+    def header(self):
+        if self.page_no()==1: return
+        self.set_fill_color(*GREEN); self.rect(0,0,210,2.0,style="F")
+        self.set_xy(self.X0,8.2); self.set_font("Cormorant","B",11); self.set_text_color(*NAVY)
+        self.cell(0,5,"A2Z Accounting Solutions")
+        self.set_xy(self.X0,9); self.set_font("Nunito","",7); self.set_text_color(*MUTED)
+        self.cell(self.CW,5, getattr(self,"doc_title","Engagement Agreement"), align="R")
+        self.set_draw_color(*LINE); self.set_line_width(0.2); self.line(self.X0,15.6,self.XR,15.6)
+        self.set_xy(self.l_margin, self.t_margin)
+    def footer(self):
+        if self.page_no()==1: return
+        self.set_fill_color(*NAVY); self.rect(0,285,210,12,style="F")
+        self.set_fill_color(*GREEN); self.rect(0,285,210,0.8,style="F")
+        self.set_y(288.6); self.set_font("Nunito","",7); self.set_text_color(210,221,232)
+        self.set_x(self.X0); self.cell(self.CW/2,4,"A2Z Accounting Solutions  \u00b7  Regulated by ACCA")
+        self.cell(self.CW/2,4,f"Page {self.page_no()} of {{nb}}",align="R")
+
+def _esec(p, n, klab, title):
+    p.ln(3.0); p.need(22)
+    p.f("Nunito","B",7.5,GREEN); p.set_x(p.X0); p.cell(0,4," ".join(klab.upper()),new_x=XPos.LMARGIN,new_y=YPos.NEXT); p.ln(1.2)
+    p.f("Cormorant","B",15.5,NAVY); p.set_x(p.X0)
+    p.cell(8.5,7,f"{n}.",new_x=XPos.RIGHT,new_y=YPos.TOP)
+    p.multi_cell(p.CW-8.5,7,title,new_x=XPos.LMARGIN,new_y=YPos.NEXT)
+    _yr=p.get_y()+0.6; p.set_draw_color(*GREEN); p.set_line_width(0.6); p.line(p.X0,_yr,p.X0+15,_yr); p.ln(2.6)
+
+def _eng_note(p, text):
+    p.ln(1); p.need(14); y=p.get_y()
+    p.set_font("Nunito","",9); nl=p.multi_cell(p.CW-12,4.4,text,dry_run=True,output="LINES",markdown=True)
+    h=5+max(len(nl),1)*4.4
+    p.set_fill_color(*PALE); p.rect(p.X0,y,p.CW,h,style="F"); p.set_fill_color(*NAVY); p.rect(p.X0,y,1.4,h,style="F")
+    p.f("Nunito","",9,(39,50,59)); p.set_xy(p.X0+6,y+2.4); p.multi_cell(p.CW-12,4.4,text,align="L",markdown=True)
+    p.set_y(y+h+1)
+
+def build_engagement(wb, out, ref=None, acceptance=None, eng=None):
+    d=read_ltd(wb); ref=ref or ref_for(d["company"]); d["ref"]=ref
+    eng=eng or {}
+    version=str(eng.get("version") or "v1.0")
+    form=_eng_form(eng.get("legal_form") or _eng_form_from_kind(eng.get("kind")))
+    d["lines"]=_eng_relabel_lines(d["lines"], form)
+    fl=_eng_flags(d["lines"])
+    company=eng.get("client_legal_name") or d["company"]
+    lead=eng.get("a2z_lead") or {}; lead_name=lead.get("name") or ""
+    signatory=eng.get("a2z_signatory") or lead or {}
+    _pn, people_are=_eng_people_phrase(eng, form)
+    addr=eng.get("address") or ""; number=eng.get("entity_number") or ""
+    numlab=eng.get("entity_number_label") or form["number_label"]
+    sw=[]
+    for l in d["lines"]:
+        low=str(l[0]).lower()
+        if any(k in low for k in ("software","quickbooks","xero","dext")): sw.append(str(l[0]))
+    sw=list(dict.fromkeys(sw))
+
+    p=EngagementPDF(); p.alias_nb_pages(); p.right_header="ENGAGEMENT AGREEMENT"; p.doc_title="Engagement Agreement"
+    cover_engagement(p, company, "Accounting & tax services - terms of engagement", d["date"], ref,
+                     lead_name=lead_name or "A2Z Accounting Solutions", status=("Accepted" if acceptance else "For acceptance"))
+    p.add_page()
+
+    _esec(p,1,"Welcome to A2Z","Welcome, and thank you")
+    idnum=f", {numlab} {number}" if (form["has_number"] and number and numlab) else ""
+    idaddr=f", of {addr}" if addr else ""
+    _eng_para(p, f"Thank you for choosing A2Z Accounting Solutions to look after {company}. This agreement sets out what we will do for you, how often, and what it costs, in plain English. You do not need to know the accounting or tax answer - that is exactly what we are here for. Your part is simple: keep good records, send us what we ask for when we ask for it, tell us anything relevant, and flag anything you are unsure about.")
+    _eng_para(p, f"This agreement is made between **A2Z Accounting Solutions Ltd** (company number SC618668, 1st Floor, 499 Union Street, Aberdeen, AB11 6DB) - \u201cwe\u201d, \u201cus\u201d, \u201cthe firm\u201d - and **{company}**{idnum}{idaddr} - \u201cyou\u201d, \u201cthe client\u201d. We are Chartered Certified Accountants regulated by the ACCA and follow its Code of Ethics and Conduct. It takes effect on the date you accept it and continues until ended by either of us in writing.")
+
+    _esec(p,2,"Your service package","The services we will provide")
+    _eng_para(p, "These are the services covered by your fee, with the frequency of each. This schedule is the definitive list of what is included; anything outside it is agreed and quoted separately.")
+    fee_table(p, d["lines"], prices=False)
+
+    if sw:
+        _esec(p,3,"Included software","The tools you will use")
+        _eng_para(p, "Your fee includes the following software, set up and supported by us. Licences are for use while you are engaged with us, under the providers' own terms, and end with the engagement unless you arrange to take them over.")
+        _eng_ticklist(p, sw)
+        _n=4
+    else:
+        _n=3
+
+    _esec(p,_n,"The fees","Your fees"); _fee_n=_n
+    p.need(31); y=p.get_y(); bh=25; p.rrect(p.X0,y,p.CW,bh,fill=NAVY,style="F")
+    p.f("Nunito","B",7.5,A9BBD0); p.set_xy(p.X0+8,y+5.5); p.cell(0,4," ".join("YOUR PROFESSIONAL FEE"))
+    p.f("Cormorant","B",16,WHITE); p.set_xy(p.X0+8,y+10.5); p.cell(0,8,"Your finance function")
+    p.f("Cormorant","B",27,WHITE); p.set_xy(p.X0+86,y+4), p.cell(p.CW-94,11,gbp(d["sub"]),align="R")
+    p.f("Nunito","",8,A9BBD0); p.set_xy(p.X0+86,y+17.4); p.cell(p.CW-94,4,f"+ VAT per month  \u00b7  {gbp(d['gross'])} gross",align="R")
+    p.set_y(y+bh+2.5)
+    total_row(p,"Monthly instalment (subtotal)",d["sub"]); total_row(p,"VAT @ 20%",d["vat"]); total_row(p,"Gross monthly instalment",d["gross"],grand=True)
+    p.ln(0.5); _eng_para(p,"Your fee is an **annual professional fee**, spread for your convenience into equal monthly instalments collected by Direct Debit in advance. It is one fixed fee for the year's service, not twelve separate monthly purchases. It changes only if the scope of work changes materially and is agreed with you in advance, and it is not billed by the hour.")
+    def _rows_from(seq, default_label="Item"):
+        out=[]
+        for x in (seq or []):
+            if isinstance(x,dict): out.append((_degen(x.get("label") or default_label), _degen(x.get("detail") or ""), num(x.get("amount",0)) or 0))
+            elif isinstance(x,(list,tuple)): out.append((_degen(x[0]), _degen(x[1]) if len(x)>1 else "", num(x[2] if len(x)>2 else 0) or 0))
+        return out
+    if (eng.get("oneoffs") is not None) or (eng.get("adhocs") is not None) or (eng.get("catchup") is not None):
+        one_rows=_rows_from(eng.get("oneoffs")); catch=num(eng.get("catchup",0)) or 0; adhoc_rows=_rows_from(eng.get("adhocs"),"Ad-hoc work")
+    else:
+        one_rows=[(_degen(a),_degen(b),c) for a,b,c in (d.get("oneoffs") or [])]; catch=0; adhoc_rows=[]
+    def _minihead(t):
+        p.ln(1.4); p.need(24); p.f("Cormorant","B",12.5,NAVY); p.set_x(p.X0); p.cell(0,6,t,new_x=XPos.LMARGIN,new_y=YPos.NEXT); p.ln(0.8)
+    if one_rows:
+        _minihead("Registration & one-off fees, on starting")
+        fee_table(p,one_rows,unit="\u00a3")
+        _os=sum(r[2] for r in one_rows); total_row(p,"One-off subtotal",_os); total_row(p,"VAT @ 20%",_os*0.2); total_row(p,"One-off inc VAT",_os*1.2,grand=True)
+    if catch>0:
+        _minihead("Catch-up / backdated work")
+        fee_table(p,[("Catch-up / backdated work","Bringing prior periods up to date; billed on starting",catch)],unit="\u00a3")
+        total_row(p,"Catch-up inc VAT",catch*1.2,grand=True)
+    if adhoc_rows:
+        _minihead("Ad-hoc & additional work")
+        _eng_para(p,"The items below sit outside your fixed fee and are quoted and billed as the work arises. Any other ad-hoc or specialist work is agreed with you before we begin.")
+        fee_table(p,[(a,(b or "Quoted and billed as the work arises"),c) for a,b,c in adhoc_rows],prices=False)
+    _dep=0
+    try: _dep=float(eng.get("deposit") or 0)
+    except Exception: _dep=0
+    if _dep>0: _eng_note(p, f"A deposit / advance of {gbp(_dep)} is payable on acceptance to reserve capacity and begin your onboarding.")
+    if d["directors"]>0 and form["ch"]:
+        _eng_note(p, f"Personal tax returns (Self Assessment) for {form['officer_plural']} and shareholders are charged separately at \u00a3120 + VAT each per year.")
+
+    _esec(p,_fee_n+1,"Working together","How we will work together")
+    _eng_para(p, "The way this works is simple. You run your business; we look after the numbers and the filings behind it. We tell you what we need and by when, ask questions where something is not clear, work to have your filings ready ahead of their deadlines, and raise anything worth acting on while there is still time to act.")
+    _eng_sublabel(p,"What you can expect from us")
+    _eng_ticklist(p,[
+        "Your agreed work planned and prepared to be ready ahead of its statutory deadlines",
+        "Your work reviewed in stages and signed off by a chartered certified (FCCA) director",
+        "Acting as your authorised agent with "+form["authorities"],
+        "Our aim to reply the same working day when you contact us before 4pm",
+        "A fixed fee agreed with you in advance"])
+
+    _esec(p,_fee_n+2,"Your responsibilities","What stays with you")
+    _eng_para(p, f"Engaging us helps you meet your obligations - it does not transfer them. Responsibility for the underlying affairs of {form['entity_the']} always remains with {people_are}. We prepare and file from what you give us; the business and its records remain yours.")
+    _eng_ticklist(p,[
+        "**Keep proper records** and provide complete, accurate information and documents.",
+        "**Meet the dates we set.** Provide records and information by the deadline **we communicate to you** - set to allow proper preparation and review - not merely before the statutory filing deadline.",
+        "**Answer our questions** fully and promptly, and tell us about anything unusual, missing or uncertain.",
+        "**Flag anything you are unsure about** - in particular anything you think may not comply with tax, accounting, VAT, payroll, CIS, company, employment or other requirements. If in doubt, tell us.",
+        "**Do not assume we can see what has not been disclosed.** We work from the records and information you provide; we cannot identify facts we have not been told.",
+        "**Silence from us is not verification.** The absence of a query does not mean a transaction has been independently checked, verified or approved.",
+        "**Review and approve** your accounts, returns, payroll and submissions where approval is required, before we file them.",
+        "**Paying tax and other liabilities** on time remains your responsibility; we will tell you what is due and when."])
+
+    st=[]
+    if fl["accounts"]: st.append("**Accounts & tax** - prepared from your records and filed once approved. This is not an audit and does not verify the completeness of the underlying records.")
+    if fl["sa"]: st.append("**Self Assessment** - prepared and filed from the information you provide by the dates we set; the accuracy of what you disclose remains yours.")
+    if fl["vat"]: st.append("**VAT** - prepared, checked and filed under Making Tax Digital from your records; the validity of transactions and paying VAT due remain yours.")
+    if fl["payroll"]: st.append("**Payroll** - payslips issued and RTI submissions made from the pay data you approve each period, by the cut-off we agree.")
+    if fl["pension"]: st.append("**Pensions / auto-enrolment** - administered alongside payroll; the statutory employer duties remain yours.")
+    if fl["cis"]: st.append("**CIS** - returns prepared and filed from the details you provide; verifying subcontractors and deductions remains yours.")
+    if fl["cs01"] and form["ch"]: st.append("**Confirmation statement** - filed as your agent from the information you confirm to us.")
+    if fl["mgmt"]: st.append("**Management & advisory reports** - prepared for internal decision-making from the data available; not audited, and figures may be provisional.")
+    if fl["software"]: st.append("**Software** - provided for use during the engagement under the providers' own terms; we are not responsible for third-party outages or provider changes.")
+    if st:
+        _esec(p,_fee_n+3,"Your services in detail","How each service works")
+        _eng_ticklist(p, st); _svc_used=1
+    else: _svc_used=0
+    _k=_fee_n+3+_svc_used
+
+    _esec(p,_k,"Fees, cancellation & deposits","If things change")
+    _eng_ticklist(p,[
+        "**An annual fee, paid monthly.** Your recurring fee is an annual professional fee paid in monthly Direct Debit instalments. Work is not performed evenly across the year - much is weighted to your year end and filing periods.",
+        "**Instalments already collected are not refunded** simply because you leave part-way through the annual cycle, and there is no automatic pro-rata refund based on months elapsed or work done in a given month.",
+        "**Future instalments stop** from the effective date your engagement ends, subject to any payment already in the banking or Direct Debit collection process.",
+        "**Work beyond fees paid.** If work already undertaken, started or committed for the year exceeds the instalments collected, we may charge a reasonable final amount for it.",
+        "**Outstanding invoices remain payable**, and any licences or filings we have paid for on your behalf remain chargeable.",
+        "**Deposits and advances.** Once you accept this engagement and we begin onboarding, setup, capacity allocation, preliminary work or incur costs in reliance on your acceptance, any deposit or advance is non-refundable if you later change your mind or cancel. Nothing here removes rights that cannot lawfully be excluded."])
+
+    _esec(p,_k+1,"Anti-money-laundering","Identity checks and our legal duties")
+    _eng_para(p, "As a firm supervised by the ACCA for anti-money-laundering, we are required by the Money Laundering Regulations and the Proceeds of Crime Act 2002 to carry out identity and background checks before and during our engagement. This protects you as well as us.")
+    _eng_ticklist(p,[
+        "We verify the identity of "+form["entity_the"]+" and of "+form["officer_plural"]+" and any beneficial owners, may use electronic verification, and may ask for documents. We keep these records for at least five years after the engagement ends.",
+        "We may be unable to start or to continue acting, and may have to suspend work, until we have completed checks we are satisfied with.",
+        "We are required to report any knowledge or suspicion of money laundering to the National Crime Agency, and the law may prohibit us from telling you that a report has been made or the reason for it.",
+        "We will not be liable for any loss arising from any action we take, or any work we are unable to do, in order to meet these legal obligations."])
+
+    _esec(p,_k+2,"The detail","Our terms of engagement")
+    _eng_ticklist(p,[
+        "**Scope & out-of-scope work** - we provide the services listed in your schedule. Anything outside it (enquiries, one-off projects, or new services) is agreed and quoted separately before we start.",
+        "**Late or incomplete information** - if records arrive late, incomplete or inaccurate, we cannot guarantee a deadline, and additional work to correct or reconstruct records may be charged.",
+        "**Advice reflects the facts and law at the time** - based on the information given and the law and HMRC practice then in force. We are not obliged to revisit past advice if the law or your circumstances later change, unless you engage us to do so.",
+        "**Estimates and forecasts** are based on assumptions and are not guarantees of outcome.",
+        "**Third-party and system delays** - we are not responsible for delays or errors caused by HMRC, Companies House, other authorities, banks or software providers.",
+        "**Confidentiality & working papers** - we keep your information confidential except where the law or our regulator requires disclosure. Our working papers remain our property; your records remain yours.",
+        "**Reliance** - our work is for you and may not be relied on by any third party unless we agree in writing.",
+        "**Liability** - limited to the extent permitted by law and as set out in our Terms of Business, which form part of this engagement; we do not exclude liability that cannot lawfully be excluded.",
+        "**Unpaid fees & suspension** - we may suspend work or withhold documents where fees are overdue, having given you notice.",
+        "**Termination** - either of us may end this engagement in writing; we will act professionally on handover to a new adviser once our fees are settled.",
+        "**Professional rules, complaints & governing law** - we are regulated by ACCA and follow its Code. Any complaint may be raised with the engagement director and, if unresolved, with ACCA. This engagement is governed by the law of Scotland."])
+
+    _esec(p,_k+3,"Data protection","How we handle your data (UK GDPR)")
+    _eng_para(p,"A2Z Accounting Solutions Ltd is the **data controller** for the personal data we hold to run our engagement with you. Where we process the personal data of your employees, subcontractors or others on your behalf - for example when we run your payroll - **you are the controller and we act as your data processor**, following your instructions and this agreement.")
+    _eng_sublabel(p,"What we process, and our lawful bases")
+    _eng_ticklist(p,[
+        "Identification and contact details, financial and accounting records, tax information, and where relevant payroll, employee and officer details",
+        "**Performance of this contract**, **legal obligation** (AML, tax, companies and charity law and our regulator's rules), and **legitimate interests** in running and securing our practice"])
+    _eng_sublabel(p,"Sharing, international processing, retention and your rights")
+    _eng_para(p,"We share data only as needed to deliver your services: "+form["authorities"]+"; pension, payroll and software providers where relevant; and our own regulated delivery team, **including our offshore processing team, who work strictly under our instruction and a written data-processing agreement** with appropriate safeguards for any processing outside the UK. We never sell your data. We keep records for as long as we act for you and at least six years afterwards, then delete them securely. If a personal-data breach affects you we will act promptly and notify you and the ICO where the law requires. You may access, correct, erase, restrict, port or object to the processing of your data, and complain to the Information Commissioner's Office (ico.org.uk). To exercise any of these, or for our full privacy notice, contact us at info@a2zaccounting.co.uk.")
+    _eng_para(p,"You confirm you have the right to share with us any personal data you provide about other people, such as your employees or officers, and that you will help us respond to any request they make about data held for your engagement.")
+    _ct="**Your consent.** By accepting this agreement you confirm you have read this section and consent to us, and our processors, handling your personal data - and, where you provide it, the personal data of your officers and employees - as described, and to us acting as your authorised agent with "+form["authorities"]+"."
+    _eng_note(p, _ct)
+
+    engagement_accept(p, company, form, signatory, acceptance=acceptance, ref=ref, version=version, sec_no=_k+4)
+
+    _esec(p,_k+5,"Finally","We are here to help")
+    _eng_para(p, "That is the detail done. What sits behind it matters more: our aim is to keep you clear on where you stand, to agree our fees with you up front rather than spring them on you, and to have your work handled by a named team and reviewed by a chartered certified (FCCA) director.")
+    _eng_para(p, "You do not need to know the answer - just keep good records, send us what we ask for when we ask for it, tell us anything relevant, and flag anything you are unsure about. The rest is ours to look after, and we are really looking forward to working with you.")
+    p.ln(1.5); p.f("Cormorant","B",15,NAVY); p.set_x(p.X0); p.cell(0,8,"Welcome to A2Z.",new_x=XPos.LMARGIN,new_y=YPos.NEXT)
+
+    p.output(out); return d
