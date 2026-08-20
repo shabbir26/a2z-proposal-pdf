@@ -929,6 +929,9 @@ def send():
     cc = d.get("cc") or []
     if cc:
         message["ccRecipients"] = [{"emailAddress": {"address": a}} for a in cc]
+    bcc = d.get("bcc") or []
+    if bcc:
+        message["bccRecipients"] = [{"emailAddress": {"address": a}} for a in bcc]
 
     # optional proposal PDF attachment
     if d.get("attach_proposal") and d.get("proposal"):
