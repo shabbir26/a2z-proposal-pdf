@@ -1755,13 +1755,11 @@ def cover_engagement(p, company, subtitle, date, ref, lead_name="A2Z Accounting 
     p.set_auto_page_break(True, margin=20)
 
 def engagement_accept(p, company, form, signatory, acceptance=None, ref="", version="v1", sec_no=99):
-    sig_name=(signatory or {}).get("name") or "A2Z Accounting Solutions Ltd"
-    sig_title=(signatory or {}).get("title") or "Director, for and on behalf of the firm"
     _esec(p, sec_no, "Signature & acceptance", "How this agreement is signed", reserve=40)
     _eng_para(p, f"This agreement is signed and accepted **electronically**. Selecting **I agree** on the secure link we send you is a deliberate act of acceptance and creates a binding engagement between {company} and A2Z Accounting Solutions Ltd, in the same way as a handwritten signature. The person accepting confirms they are authorised to accept it on behalf of {form['entity_the']}.")
     _eng_para(p, "The signature block below is completed at the moment of acceptance. We record the name and stated position of the person accepting, the exact date and time, the device network address (IP), and the version and reference of this agreement - your evidence of exactly what was agreed.")
-    p.need(54); y0=p.get_y(); gap=8; colw=(p.CW-gap)/2; h=47
-    cols=[(p.X0,"ACCEPTED BY THE CLIENT",bool(acceptance)),(p.X0+colw+gap,"FOR A2Z ACCOUNTING SOLUTIONS LTD",True)]
+    p.need(54); y0=p.get_y(); colw=p.CW; h=47
+    cols=[(p.X0,"ACCEPTED BY THE CLIENT",bool(acceptance))]
     for cx,ctitle,done in cols:
         p.rrect(cx,y0,colw,h,r=2.2,draw=LINE,style="D")
         p.set_fill_color(*(GREEN if done else (206,214,222))); p.rect(cx,y0,colw,1.8,style="F")
@@ -1778,11 +1776,8 @@ def engagement_accept(p, company, form, signatory, acceptance=None, ref="", vers
         field(p.X0,2,"Date and time",acceptance.get("when") or "-",True)
     else:
         for i,l in enumerate(["Name","Position","Date and time"]): field(p.X0,i,l,"Completed on acceptance",False)
-    ax=p.X0+colw+gap
-    field(ax,0,"Signatory",sig_name,True)
-    field(ax,1,"Title",sig_title,True)
-    field(ax,2,"Date",(acceptance.get("when") if acceptance else "On acceptance"),bool(acceptance))
     p.set_y(y0+h+4)
+    _eng_embed_signature(p, acceptance)
     if acceptance:
         ev=[]
         if acceptance.get("ip"): ev.append("IP "+str(acceptance.get("ip")))
@@ -1791,7 +1786,7 @@ def engagement_accept(p, company, form, signatory, acceptance=None, ref="", vers
         ev.append("accepted electronically, authority to bind confirmed")
         p.f("Nunito","",8,MUTED); p.set_x(p.X0); p.multi_cell(p.CW,4.3,"Signature evidence:  "+"  \u00b7  ".join(ev),align="L")
     else:
-        p.f("Nunito","",8,MUTED); p.set_x(p.X0); p.multi_cell(p.CW,4.3,"Not yet accepted - the client completes the left-hand block via the secure link we send, which records the date, time and IP as the electronic signature.",align="L")
+        p.f("Nunito","",8,MUTED); p.set_x(p.X0); p.multi_cell(p.CW,4.3,"Not yet accepted - the client completes the block above via the secure link we send, which records the date, time and IP as the electronic signature.",align="L")
     p.ln(1)
 
 class EngagementPDF(PDF):
@@ -1999,3 +1994,44 @@ def build_engagement(wb, out, ref=None, acceptance=None, eng=None):
     p.ln(1.5); p.f("Cormorant","B",15,NAVY); p.set_x(p.X0); p.cell(0,8,"Welcome to A2Z.",new_x=XPos.LMARGIN,new_y=YPos.NEXT)
 
     p.output(out); return d
+
+
+# --- APPEND-ONLY: optional hand-drawn client signature on the engagement -------
+# Added for the optional signature pad on the /agree signing page. Draws the
+# small PNG the client optionally draws, beneath the client signature block.
+# Does NOTHING when no signature was drawn (or when acceptance is None), so
+# proposals and every existing engagement render exactly as before. Never
+# raises - a missing/oversized/invalid image is silently skipped; the typed
+# name + electronic acceptance remain the binding act.
+def _eng_embed_signature(p, acceptance):
+    try:
+        sig = (acceptance or {}).get("signature_png") or ""
+        if not sig or "base64," not in sig:
+            return
+        import base64 as _b64, io as _io, struct as _st
+        raw = _b64.b64decode(sig.split("base64,", 1)[1], validate=False)
+        if not raw or len(raw) > 400000:
+            return
+        if raw[:8] != b"\x89PNG\r\n\x1a\n" or raw[12:16] != b"IHDR":
+            return
+        w_px, h_px = _st.unpack(">II", raw[16:24])
+        if not w_px or not h_px:
+            return
+        draw_w = min(64.0, p.CW * 0.5)
+        draw_h = draw_w * (float(h_px) / float(w_px))
+        if draw_h > 22.0:
+            draw_h = 22.0
+            draw_w = draw_h * (float(w_px) / float(h_px))
+        p.need(draw_h + 9.0)
+        y = p.get_y()
+        p.f("Nunito", "", 6.6, MUTED); p.set_xy(p.X0, y); p.cell(0, 3.4, "CLIENT SIGNATURE (AS DRAWN)")
+        try:
+            p.image(_io.BytesIO(raw), x=p.X0, y=y + 4.5, w=draw_w, h=draw_h)
+        except Exception:
+            p.set_y(y); return
+        p.set_y(y + 4.5 + draw_h + 1.5)
+        p.set_draw_color(*SOFTLINE); p.set_line_width(0.2)
+        p.line(p.X0, p.get_y(), p.X0 + draw_w, p.get_y())
+        p.ln(2.5)
+    except Exception:
+        return
