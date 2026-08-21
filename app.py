@@ -377,7 +377,7 @@ def _pdf_bytes_for(d):
         return f.read()
 
 
-def _enhanced_email(d, kind, scenario):
+def _enhanced_email(d, kind, scenario, accept_url=None):
     """Returns (subject, text_body, html_body). Text is his exact wording; html is a
     branded design (navy + GREEN, matching the proposal PDF, so it is clearly distinct
     from the welcome email's gold). His a2z_proposals_fpdf.py is NOT modified."""
@@ -436,12 +436,34 @@ def _enhanced_email(d, kind, scenario):
     L += [""]
 
     # ---- itemised setup ----
-    setup_rows = []   # (label, value)
+    # De-dup: proposalToContract derives `registrations` FROM the one-offs, so the
+    # workbook round-trip returns the SAME registration in BOTH d['regs'] and
+    # d['oneoffs'] under differently-worded labels. Hide a one-off when it
+    # classifies to a registration key already shown (mirrors how the reg was
+    # derived); a normalised word-set match is kept as a fallback.
+    def _reg_key(label):
+        n = str(label or "").lower()
+        if _re.search(r"company formation|company registration|incorporat", n): return "company"
+        if _re.search(r"\bpaye\b|payroll registration", n): return "paye"
+        if _re.search(r"vat registration", n): return "vat"
+        if _re.search(r"subcontractor|cis.*sub", n): return "cis_sub"
+        if _re.search(r"contractor cis|cis.*contractor", n): return "cis_con"
+        if _re.search(r"sole trader|self.?assessment registration|personal tax registration", n): return "sa"
+        return None
+    def _wordset(label):
+        toks = _re.sub(r"[^a-z0-9]+", " ", str(label or "").lower()).split()
+        drop = {"registration", "registrations", "fee", "one", "off", "oneoff",
+                "setup", "set", "up", "the", "a", "for", "of", "and"}
+        return frozenset(t for t in toks if t not in drop)
+    setup_rows = []
     setup_total = 0
-    reg_labels = set()
+    reg_keys = set()
+    reg_wordsets = []
     for r in regs:
         lab = str(r.get("label") or "").strip()
-        reg_labels.add(lab.lower())
+        k = r.get("key") or _reg_key(lab)
+        if k: reg_keys.add(k)
+        reg_wordsets.append(_wordset(lab))
         fee = num(r.get("fee")) or 0
         if r.get("included") or fee <= 0:
             setup_rows.append((lab, "included"))
@@ -452,8 +474,11 @@ def _enhanced_email(d, kind, scenario):
         price = num(o[2]) if o and len(o) > 2 else 0
         if not desc:
             continue
-        dl = desc.lower()
-        if any(dl == rl or dl in rl or rl in dl for rl in reg_labels):
+        ok = _reg_key(desc)
+        if ok and ok in reg_keys:
+            continue
+        ws = _wordset(desc)
+        if ws and any(ws == rw or ws <= rw or rw <= ws for rw in reg_wordsets if rw):
             continue
         if price and price > 0:
             setup_rows.append((desc, "%s + VAT" % gbp(price))); setup_total += price
@@ -520,84 +545,97 @@ def _enhanced_email(d, kind, scenario):
     L += ["", closing]
     text_body = "\n".join(L)
 
-    # ---------- branded HTML (navy + green) ----------
-    NAVY = "#0D2B42"; GREEN = "#1E6B47"; CREAM = "#FBF8F3"; INK = "#243a4d"; MUTE = "#9fb3c8"
+    # ---------- branded HTML (firm brand: A2Z logo + gold; matches the shell used
+    #            by the "Send for signing" email so both look identical) ----------
+    NAVY = "#0D2B42"; GOLD = "#C4905A"; GREEN = "#1E6B47"; INK = "#1f3a56"; MUTE = "#9fb3c8"
+    LOGO = "https://a2zaccounting.co.uk/wp-content/uploads/2026/07/a2z-logo.png"
     svc_rows = "".join(
         '<tr><td valign="top" style="padding:3px 10px 3px 0;color:%s;font-weight:bold;">&#10003;</td>'
-        '<td style="padding:3px 0;color:%s;font-size:15px;">%s</td></tr>' % (GREEN, INK, esc(x))
+        '<td style="padding:3px 0;color:%s;font-size:15px;">%s</td></tr>' % (GOLD, INK, esc(x))
         for x in (svc or ["the services we discussed"]))
-    setup_html = ""
-    if setup_rows:
-        rows = "".join(
-            '<tr><td style="padding:7px 0;border-bottom:1px solid #eee6d8;color:%s;font-size:14px;">%s</td>'
-            '<td align="right" style="padding:7px 0;border-bottom:1px solid #eee6d8;color:%s;font-size:14px;white-space:nowrap;">%s</td></tr>'
-            % (INK, esc(lab), (GREEN if val == "included" else INK), esc(val))
-            for lab, val in setup_rows)
-        if setup_total <= 0:
-            total_html = '<tr><td style="padding:9px 0 0;font-weight:bold;color:%s;font-size:14px;">%s</td><td></td></tr>' % (GREEN, esc(setup_total_line))
-        elif len(setup_rows) > 1:
-            total_html = '<tr><td style="padding:9px 0 0;font-weight:bold;color:%s;">One-off total</td><td align="right" style="padding:9px 0 0;font-weight:bold;color:%s;white-space:nowrap;">%s + VAT</td></tr>' % (GREEN, GREEN, esc(gbp(setup_total)))
-        else:
-            total_html = ''
-        setup_html = (
-            '<div style="font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:%s;font-weight:bold;margin:26px 0 10px;">To get you set up</div>'
-            '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="border:1px solid #eee6d8;border-radius:8px;padding:6px 16px;background:#FCFAF5;">%s%s</table>'
-            % (GREEN, rows, total_html))
     fee_lines_html = "".join('<p style="margin:12px 0 0;color:%s;font-size:14px;line-height:1.6;">%s</p>' % (INK, esc(fl)) for fl in fee_lines[1:])
-    extra_html = ""
-    if extra:
-        links = "".join('<div style="margin:6px 0;"><a href="%s" style="color:%s;font-weight:bold;text-decoration:none;font-size:14px;">%s &rarr;</a></div>' % (u, GREEN, esc(lab)) for lab, u in extra)
-        extra_html = ('<p style="margin:22px 0 6px;color:%s;font-size:15px;">We\'d also take care of a couple of registrations for you - you can complete those here as well:</p>%s' % (INK, links))
     fee_box = ""
     if fee_display:
         fee_box = (
             '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="margin:22px 0;"><tr>'
             '<td style="background:%s;border-radius:8px;padding:20px 24px;">'
             '<div style="color:%s;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;">Your fee</div>'
-            '<div style="color:#ffffff;font-size:30px;font-family:Georgia,serif;margin:4px 0 2px;">%s</div>'
-            '<div style="color:#cfe3d8;font-size:13px;">%s &middot; %s</div>'
-            '</td></tr></table>' % (NAVY, MUTE, esc(fee_display), esc(fee_period), esc(fee_sub)))
+            '<div style="color:#ffffff;font-size:30px;font-family:\'Cormorant Garamond\',Georgia,serif;font-weight:600;margin:4px 0 2px;">%s</div>'
+            '<div style="color:#cfe0f0;font-size:13px;">%s &middot; %s</div>'
+            '</td></tr></table>' % (NAVY, GOLD, esc(fee_display), esc(fee_period), esc(fee_sub)))
+    setup_html = ""
+    if setup_rows:
+        rows = "".join(
+            '<tr><td style="padding:7px 0;border-bottom:1px solid #e2d2a8;color:%s;font-size:14px;">%s</td>'
+            '<td align="right" style="padding:7px 0;border-bottom:1px solid #e2d2a8;color:%s;font-size:14px;white-space:nowrap;">%s</td></tr>'
+            % (INK, esc(lab), (GREEN if val == "included" else INK), esc(val))
+            for lab, val in setup_rows)
+        if setup_total <= 0:
+            total_html = '<tr><td style="padding:9px 0 0;font-weight:bold;color:%s;font-size:14px;">%s</td><td></td></tr>' % (GREEN, esc(setup_total_line))
+        elif len(setup_rows) > 1:
+            total_html = '<tr><td style="padding:9px 0 0;font-weight:bold;color:%s;">One-off total</td><td align="right" style="padding:9px 0 0;font-weight:bold;color:%s;white-space:nowrap;">%s + VAT</td></tr>' % (NAVY, NAVY, esc(gbp(setup_total)))
+        else:
+            total_html = ''
+        setup_html = (
+            '<div style="font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:%s;font-weight:bold;margin:26px 0 10px;">To get you set up</div>'
+            '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="border:1px solid #e2d2a8;border-radius:8px;padding:6px 16px;background:#FBF8F3;">%s%s</table>'
+            % (GOLD, rows, total_html))
+    # CTA: with a live accept link, lead with Accept & Sign and suppress the
+    # onboarding/reg links so the client accepts FIRST. Otherwise (manual
+    # copy/Outlook send, no token) keep the onboarding CTA + reg links.
+    if accept_url:
+        cta_html = (
+            '<p style="margin:24px 0 14px;color:%s;font-size:15px;line-height:1.65;">'
+            'To go ahead, accept and sign your proposal below. It takes about a minute: '
+            'read it through, add your name and position, and select Accept &amp; Sign. '
+            'Your proposal is attached for your records.</p>'
+            '<p style="margin:0 0 22px;"><a href="%s" style="display:inline-block;background:%s;color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:8px;font-weight:bold;font-size:15px;">Accept &amp; Sign</a></p>'
+            '<p style="margin:0 0 4px;color:%s;font-size:14px;line-height:1.6;">Everything else comes after that. Once you have accepted, we will email you the next steps in order: your engagement agreement to sign, then your onboarding form, then your welcome email with your Direct Debit link. Please do not action any other link until you have accepted here first.</p>'
+            % (INK, esc(accept_url), GREEN, INK))
+    else:
+        extra_html = ""
+        if extra:
+            links = "".join('<div style="margin:6px 0;"><a href="%s" style="color:%s;font-weight:bold;text-decoration:none;font-size:14px;">%s &rarr;</a></div>' % (u, GREEN, esc(lab)) for lab, u in extra)
+            extra_html = ('<p style="margin:22px 0 6px;color:%s;font-size:15px;">We\'d also take care of a couple of registrations for you - you can complete those here as well:</p>%s' % (INK, links))
+        cta_html = (
+            '<p style="margin:24px 0 14px;color:%s;font-size:15px;line-height:1.65;">%s</p>'
+            '<a href="%s" style="display:inline-block;background:%s;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:6px;font-weight:bold;font-size:14px;">%s</a>%s'
+            % (INK, esc(onboard_text), cta_url, GREEN, esc(cta_label), extra_html))
     html_body = (
-        '<div style="margin:0;padding:0;background:%s;">'
-        '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="background:%s;"><tr><td align="center" style="padding:24px 12px;">'
-        '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%%;">'
-        # header
-        '<tr><td style="background:%s;padding:26px 32px;border-radius:10px 10px 0 0;">'
-        '<div style="font-family:Georgia,serif;color:#EAF0F7;font-size:13px;letter-spacing:3px;">A2Z ACCOUNTING SOLUTIONS</div>'
-        '<div style="height:3px;width:46px;background:%s;margin:14px 0;"></div>'
-        '<div style="color:%s;font-size:11px;letter-spacing:2px;text-transform:uppercase;">Proposal of services</div>'
-        '<div style="color:#ffffff;font-size:23px;font-family:Georgia,serif;margin-top:3px;">%s</div>'
-        '</td></tr>'
-        # body
-        '<tr><td style="background:#ffffff;padding:30px 32px;font-family:Arial,Helvetica,sans-serif;">'
+        '<div style="margin:0;padding:0;background:#eef1f5;font-family:Arial,Helvetica,sans-serif">'
+        '<div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e2e7ec">'
+        '<div style="background:#ffffff;padding:30px 28px 0;text-align:center">'
+        '<img src="%s" alt="A2Z Accounting Solutions" width="240" style="width:240px;max-width:66%%;display:inline-block;border:0;outline:none">'
+        '<div style="color:%s;font-size:11px;letter-spacing:.22em;text-transform:uppercase;font-weight:bold;margin-top:16px">Proposal of Services</div>'
+        '</div>'
+        '<div style="height:2px;background:%s;margin:16px 28px 0;font-size:0;line-height:0">&#8202;</div>'
+        '<div style="padding:26px 28px 12px;color:%s;line-height:1.62;font-size:15px">'
         '<p style="margin:0 0 16px;color:%s;font-size:15px;">Hi %s,</p>'
         '<p style="margin:0 0 20px;color:%s;font-size:15px;line-height:1.65;">%s</p>'
         '<div style="font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:%s;font-weight:bold;margin:0 0 10px;">What we\'d take care of for you</div>'
         '<table role="presentation" cellpadding="0" cellspacing="0">%s</table>'
-        '%s'   # fee box
-        '%s'   # fee lines (directors etc)
-        '%s'   # setup
-        '<p style="margin:24px 0 14px;color:%s;font-size:15px;line-height:1.65;">%s</p>'
-        '<a href="%s" style="display:inline-block;background:%s;color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:6px;font-weight:bold;font-size:14px;">%s</a>'
-        '%s'   # extra links
+        '%s%s%s%s'
         '<p style="margin:24px 0 0;color:%s;font-size:15px;line-height:1.65;">%s</p>'
-        '</td></tr>'
-        # footer
-        '<tr><td style="background:%s;padding:18px 32px;border-radius:0 0 10px 10px;color:%s;font-size:12px;line-height:1.7;">'
-        'A2Z Accounting Solutions &middot; 01224 042961 &middot; info@a2zaccounting.co.uk<br>'
-        '1st Floor, 499 Union Street, Aberdeen, AB11 6DB &middot; Regulated by ACCA'
-        '</td></tr>'
-        '</table></td></tr></table></div>'
-    ) % (CREAM, CREAM, NAVY, GREEN, MUTE, esc(company),
-         INK, esc(name), INK, esc(intro), GREEN, svc_rows,
-         fee_box, fee_lines_html, setup_html,
-         INK, esc(onboard_text), cta_url, GREEN, esc(cta_label),
-         extra_html, INK, esc(closing), NAVY, MUTE)
+        '</div>'
+        '<div style="background:#0f2a47;padding:20px 28px 24px">'
+        '<div style="color:#d5e0ec;font-size:12.5px;font-weight:bold;margin-bottom:5px">A2Z Accounting Solutions Ltd</div>'
+        '<div style="color:#8ba0b6;font-size:11px;line-height:1.65">First Floor, 499 Union Street, Aberdeen, AB11 6DB &#160;&#183;&#160; 01224 042961 &#160;&#183;&#160; info@a2zaccounting.co.uk<br>Chartered Certified Accountants, regulated by ACCA</div>'
+        '<div style="border-top:1px solid #1c3b58;margin:16px 0 0;padding-top:16px;text-align:center">'
+        '<img src="cid:a2zlogo2" alt="A2Z Practice Hub" height="30" style="height:30px;display:inline-block;border:0;outline:none">'
+        '<div style="color:#9fb2c6;font-size:11px;margin-top:10px;line-height:1.6">Part of the <strong style="color:#e6edf4">A2Z Group</strong> - software, training and people to help your business grow.<br>Come and see what we offer.</div>'
+        '<div style="margin-top:14px"><a href="https://www.a2zpracticehub.com/" style="display:inline-block;background:%s;color:#ffffff;text-decoration:none;padding:10px 26px;border-radius:6px;font-size:12.5px;font-weight:bold;letter-spacing:.3px">Visit the Practice Hub &#8594;</a></div>'
+        '</div>'
+        '</div>'
+        '</div></div>'
+    ) % (LOGO, GOLD, GOLD,
+         INK, INK, esc(name), INK, esc(intro), GOLD, svc_rows,
+         fee_box, fee_lines_html, setup_html, cta_html,
+         INK, esc(closing), GREEN)
 
     return subject, text_body, html_body
 
 
-def _email_for(d):
+def _email_for(d, accept_url=None):
     """Produce the proposal email. LTD/SA use _enhanced_email (his wording + itemised
     setup + 3 onboarding scenarios); PARTNERSHIP keeps his original build_email."""
     kind = (d.get("kind") or "LTD").upper()
@@ -613,11 +651,11 @@ def _email_for(d):
     wb.save(wb_path)
     wb2 = GEN.safe_load_workbook(wb_path)
     if kind == "SA":
-        return _enhanced_email(GEN.read_sa(wb2), "SA", scenario)
+        return _enhanced_email(GEN.read_sa(wb2), "SA", scenario, accept_url=accept_url)
     if kind == "PARTNERSHIP":
         psub, pbody = GEN.build_email(GEN.read_partnership(wb2), "PARTNERSHIP")
         return psub, pbody, _text_to_html(pbody)
-    return _enhanced_email(GEN.read_ltd(wb2), "LTD", scenario)
+    return _enhanced_email(GEN.read_ltd(wb2), "LTD", scenario, accept_url=accept_url)
 
 
 @app.route("/email", methods=["POST", "OPTIONS"])
@@ -908,7 +946,7 @@ def send():
     # matches his desktop tool exactly (warm tone, service list, all reg links).
     if d.get("attach_proposal") and d.get("proposal") and not d.get("html_override"):
         try:
-            esubject, ebody, ehtml = _email_for(d["proposal"])
+            esubject, ebody, ehtml = _email_for(d["proposal"], accept_url=d.get("accept_url"))
             subject = subject or esubject
             html = ehtml or _text_to_html(ebody)
         except Exception:
