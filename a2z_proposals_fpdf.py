@@ -387,7 +387,7 @@ def onboarding_partnership(p, needs_reg=True, direct_debit=True):
     items.append(("We set you up and get going","We configure your software and services, and your dedicated team takes it from here. Your first deliverables are scheduled straight away.",None,None))
     _onboarding_render(p, items)
 
-def commit_accept(p, company):
+def commit_accept(p, company, acceptance=None):
     p.add_page(); p.klabel("Our commitments to you"); p.heading("The promises behind the fee",22); p.ln(1)
     p.f("Nunito","",9.5,(74,86,96)); p.set_x(p.X0); p.multi_cell(p.CW,5.0,"Whatever you choose, every A2Z engagement comes with the same four promises.", align="L", new_x=XPos.LMARGIN,new_y=YPos.NEXT); p.ln(4)
     for c in ["A fixed monthly fee, agreed in advance and never billed by surprise.","A 30-day rolling agreement, with no long tie-in.","A named team, with an FCCA director who signs off your work.","Your filing completed ahead of every deadline."]:
@@ -406,6 +406,7 @@ def commit_accept(p, company):
         lx=p.X0+9+i*(colw+gap); p.line(lx,ly,lx+colw,ly)
         p.f("Nunito","",7,(169,187,208)); p.set_xy(lx,ly+1.6); p.cell(colw,4,lab.upper())
     p.set_y(y+h+6)
+    _proposal_signature(p, company, acceptance)
     p.f("Cormorant","B",14,NAVY); p.set_x(p.X0); p.cell(0,7,"We look forward to working with you.",new_x=XPos.LMARGIN,new_y=YPos.NEXT); p.ln(2)
     p.hline(LINE); p.ln(3)
     p.f("Nunito","B",8.6,NAVY); p.cell(p.CW/2,4,"A2Z Accounting Solutions")
@@ -859,7 +860,7 @@ def read_partnership(wb):
                 source=str(g('J25') or '').strip(),referrer=str(g('J26') or '').strip())
 
 
-def build_ltd(wb, out, include_tiers=True, ref=None):
+def build_ltd(wb, out, include_tiers=True, ref=None, acceptance=None):
     d=read_ltd(wb); ref=ref or ref_for(d['company']); d['ref']=ref; p=PDF(); p.alias_nb_pages()
     cover(p,d['company'],"Limited company accounting & tax",d['date'],ref,prepared_by=d.get('prepared_by'))
     letter(p,d['contact'],d['company'],[
@@ -928,12 +929,12 @@ def build_ltd(wb, out, include_tiers=True, ref=None):
     reg_support_page(p, d)
     mgmt_accounts_page(p, d)
     onboarding(p, "LTD", needs_reg=bool(d.get('comp_reg')))   # reg form iff company registration is required, else onboarding form
-    commit_accept(p,d['company'])
+    commit_accept(p,d['company'],acceptance)
     rate_card_page(p, wb)
     proof(p)
     p.output(out); return d
 
-def build_sa(wb, out, ref=None):
+def build_sa(wb, out, ref=None, acceptance=None):
     d=read_sa(wb); ref=ref or ref_for(d['company']); d['ref']=ref; p=PDF(); p.alias_nb_pages()
     cover(p,d['company'],"Self-assessment & sole-trader accounting",d['date'],ref,prepared_by=d.get('prepared_by'))
     letter(p,d['contact'],d['company'],[
@@ -1029,12 +1030,12 @@ def build_sa(wb, out, ref=None):
         p.set_y(y+H+2)
     reg_support_page(p, d)
     onboarding(p, "SA", needs_reg=bool(d.get('sa_reg')), direct_debit=(d["freq"]=="Monthly"))   # reg form iff self-assessment registration required
-    commit_accept(p,d['company'])
+    commit_accept(p,d['company'],acceptance)
     rate_card_page(p, wb)
     proof(p)
     p.output(out); return d
 
-def build_partnership(wb, out, include_tiers=True, ref=None):
+def build_partnership(wb, out, include_tiers=True, ref=None, acceptance=None):
     d=read_partnership(wb); ref=ref or ref_for(d['company']); d['ref']=ref; p=PDF(); p.alias_nb_pages()
     cover(p,d['company'],"Partnership accounting & tax",d['date'],ref,prepared_by=d.get('prepared_by'))
     letter(p,d['contact'],d['company'],[
@@ -1103,7 +1104,7 @@ def build_partnership(wb, out, include_tiers=True, ref=None):
     reg_support_page(p, d)
     mgmt_accounts_page(p, d)
     onboarding_partnership(p, needs_reg=d['reg'])
-    commit_accept(p,d['company'])
+    commit_accept(p,d['company'],acceptance)
     rate_card_page(p, wb, partnership=True)
     proof(p)
     p.output(out); return d
@@ -2031,5 +2032,68 @@ def _eng_embed_signature(p, acceptance):
         p.set_draw_color(*SOFTLINE); p.set_line_width(0.2)
         p.line(p.X0, p.get_y(), p.X0 + draw_w, p.get_y())
         p.ln(2.5)
+    except Exception:
+        return
+
+
+# --- APPEND-ONLY: stamp the client's acceptance onto the PROPOSAL ---------------
+# Mirrors _eng_embed_signature (engagement) but renders a full acceptance panel on
+# the proposal's "Accept your proposal" page: the optional hand-drawn signature
+# PNG (drawn on white), plus the typed Name / Position / Date. Called once from
+# commit_accept. Does NOTHING when acceptance is None (unsigned proposals render
+# exactly as before) and NEVER raises - a missing/oversized/invalid image is
+# silently skipped and the typed details still stamp. The typed name + the "I
+# agree" click on the signing page remain the binding act.
+def _proposal_signature(p, company, acceptance):
+    if not acceptance:
+        return
+    try:
+        name=(acceptance.get("name") or "").strip()
+        position=(acceptance.get("position") or "").strip()
+        when=(acceptance.get("when") or "").strip()
+        sig=(acceptance.get("signature_png") or "")
+        if not (name or position or when or sig):
+            return
+        # decode the optional drawn signature (PNG data-URL), inert on any problem
+        img=None; draw_w=0.0; draw_h=0.0
+        if sig and "base64," in sig:
+            try:
+                import base64 as _b64, io as _io, struct as _st
+                raw=_b64.b64decode(sig.split("base64,",1)[1], validate=False)
+                if raw and len(raw)<=400000 and raw[:8]==b"\x89PNG\r\n\x1a\n" and raw[12:16]==b"IHDR":
+                    w_px,h_px=_st.unpack(">II", raw[16:24])
+                    if w_px and h_px:
+                        draw_w=min(58.0, p.CW*0.42); draw_h=draw_w*(float(h_px)/float(w_px))
+                        if draw_h>18.0: draw_h=18.0; draw_w=draw_h*(float(w_px)/float(h_px))
+                        img=_io.BytesIO(raw)
+            except Exception:
+                img=None
+        sig_zone=(draw_h+6.6) if img else 12.0
+        panel_h=11.5+sig_zone+22.7
+        p.need(panel_h+8); p.ln(4)
+        y=p.get_y()
+        p.rrect(p.X0,y,p.CW,panel_h, r=2.2, fill=PALE, draw=LINE, style="DF")
+        p.set_fill_color(*GREEN); p.rect(p.X0,y,p.CW,2.0,style="F")
+        p.f("NunitoSemi","",7.5,GREEN); p.set_xy(p.X0+7,y+5.2); p.cell(0,4," ".join("ACCEPTED BY THE CLIENT"))
+        sy=y+11.5
+        if img:
+            try: p.image(img, x=p.X0+7, y=sy, w=draw_w, h=draw_h)
+            except Exception: pass
+            ry=sy+draw_h+2.0
+        else:
+            p.f("Cormorant","B",13,NAVY); p.set_xy(p.X0+7,sy+1.0); p.cell(0,6,"Accepted electronically")
+            ry=sy+10.0
+        p.set_draw_color(*SOFTLINE); p.set_line_width(0.3); p.line(p.X0+7,ry,p.X0+7+max(draw_w,52.0),ry)
+        p.f("Nunito","",6.6,MUTED); p.set_xy(p.X0+7,ry+1.2); p.cell(0,3.4,"CLIENT SIGNATURE")
+        # typed fields: Name | Position on one row, Date full-width below
+        f0=y+11.5+sig_zone+2.0
+        colw=(p.CW-14-9)/2
+        for i,(lab,val) in enumerate([("NAME",name or "-"),("POSITION",position or "-")]):
+            fx=p.X0+7+i*(colw+9)
+            p.f("Nunito","",6.6,MUTED); p.set_xy(fx,f0); p.cell(colw,3.4,lab)
+            p.f("NunitoSemi","",8.6,NAVY); p.set_xy(fx,f0+4.0); p.cell(colw,4.2,val)
+        p.f("Nunito","",6.6,MUTED); p.set_xy(p.X0+7,f0+9.0); p.cell(p.CW-14,3.4,"DATE")
+        p.f("NunitoSemi","",8.6,NAVY); p.set_xy(p.X0+7,f0+13.0); p.cell(p.CW-14,4.2,when or "-")
+        p.set_y(y+panel_h+4)
     except Exception:
         return
