@@ -365,10 +365,9 @@ def onboarding(p, kind, needs_reg=False, direct_debit=True):
         ("Sign your engagement letter","A quick electronic signature. It is a legal requirement before we can act for you.",None,None),
     ]
     if direct_debit:
-        dd_link=DD_FORM if (DD_FORM and DD_FORM.startswith("http")) else None
-        dd_desc=("Complete our short Direct Debit mandate so your fees collect automatically, with no invoices to chase." if dd_link
-                 else "Provide your bank details so fees are collected automatically, with no invoices to chase.")
-        items.append(("Set up your Direct Debit",dd_desc,dd_link,"Open the Direct Debit mandate"))
+        dd_desc=("Your fees are collected automatically by Direct Debit, so there are no invoices to chase. "
+                 "The link to set up your mandate will be in your welcome email, once your engagement is signed.")
+        items.append(("Set up your Direct Debit",dd_desc,None,None))
     items.append(("We set you up and get going","We configure your software and services, and your dedicated team takes it from here. Your first deliverables are scheduled straight away.",None,None))
     _onboarding_render(p, items)
 
@@ -382,10 +381,9 @@ def onboarding_partnership(p, needs_reg=True, direct_debit=True):
         ("Sign your engagement letter","A quick electronic signature. It is a legal requirement before we can act for you.",None,None),
     ]
     if direct_debit:
-        dd_link=DD_FORM if (DD_FORM and DD_FORM.startswith("http")) else None
-        dd_desc=("Complete our short Direct Debit mandate so your fees collect automatically, with no invoices to chase." if dd_link
-                 else "Provide your bank details so fees are collected automatically, with no invoices to chase.")
-        items.append(("Set up your Direct Debit",dd_desc,dd_link,"Open the Direct Debit mandate"))
+        dd_desc=("Your fees are collected automatically by Direct Debit, so there are no invoices to chase. "
+                 "The link to set up your mandate will be in your welcome email, once your engagement is signed.")
+        items.append(("Set up your Direct Debit",dd_desc,None,None))
     items.append(("We set you up and get going","We configure your software and services, and your dedicated team takes it from here. Your first deliverables are scheduled straight away.",None,None))
     _onboarding_render(p, items)
 
@@ -905,7 +903,7 @@ def build_ltd(wb, out, include_tiers=True, ref=None):
     _extra=[]
     if (num(d.get('catchup',0)) or 0)>0: _extra.append(("Catch-up / backdated work","",num(d['catchup'])))
     for _a in (d.get('adhocs') or []):
-        if isinstance(_a,dict): _extra.append((str(_a.get('label') or "Ad-hoc"), str(_a.get('detail') or ""), num(_a.get('amount',0)) or 0))
+        if isinstance(_a,dict): _extra.append((str(_a.get('label') or "Catch-up work"), str(_a.get('detail') or ""), num(_a.get('amount',0)) or 0))
         else:
             try: _extra.append((str(_a[0]), str(_a[1]) if len(_a)>1 else "", num(_a[2] if len(_a)>2 else 0) or 0))
             except Exception: pass
@@ -980,7 +978,7 @@ def build_sa(wb, out, ref=None):
     _extra=[]
     if (num(d.get('catchup',0)) or 0)>0: _extra.append(("Catch-up / backdated work","",num(d['catchup'])))
     for _a in (d.get('adhocs') or []):
-        if isinstance(_a,dict): _extra.append((str(_a.get('label') or "Ad-hoc"), str(_a.get('detail') or ""), num(_a.get('amount',0)) or 0))
+        if isinstance(_a,dict): _extra.append((str(_a.get('label') or "Catch-up work"), str(_a.get('detail') or ""), num(_a.get('amount',0)) or 0))
         else:
             try: _extra.append((str(_a[0]), str(_a[1]) if len(_a)>1 else "", num(_a[2] if len(_a)>2 else 0) or 0))
             except Exception: pass
@@ -1080,7 +1078,7 @@ def build_partnership(wb, out, include_tiers=True, ref=None):
     _extra=[]
     if (num(d.get('catchup',0)) or 0)>0: _extra.append(("Catch-up / backdated work","",num(d['catchup'])))
     for _a in (d.get('adhocs') or []):
-        if isinstance(_a,dict): _extra.append((str(_a.get('label') or "Ad-hoc"), str(_a.get('detail') or ""), num(_a.get('amount',0)) or 0))
+        if isinstance(_a,dict): _extra.append((str(_a.get('label') or "Catch-up work"), str(_a.get('detail') or ""), num(_a.get('amount',0)) or 0))
         else:
             try: _extra.append((str(_a[0]), str(_a[1]) if len(_a)>1 else "", num(_a[2] if len(_a)>2 else 0) or 0))
             except Exception: pass
@@ -1895,7 +1893,7 @@ def build_engagement(wb, out, ref=None, acceptance=None, eng=None):
         fee_table(p,[("Catch-up / backdated work","Bringing prior periods up to date; billed on starting",catch)],unit="\u00a3")
         total_row(p,"Catch-up inc VAT",catch*1.2,grand=True)
     if adhoc_rows:
-        _minihead("Ad-hoc & additional work")
+        _minihead("Catch up and backdated work")
         _eng_para(p,"The items below sit outside your fixed fee and are quoted and billed as the work arises. Any other ad-hoc or specialist work is agreed with you before we begin.")
         fee_table(p,[(a,(b or "Quoted and billed as the work arises"),c) for a,b,c in adhoc_rows],prices=False)
     _dep=0
