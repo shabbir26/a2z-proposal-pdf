@@ -581,8 +581,9 @@ def _enhanced_email(d, kind, scenario, accept_url=None):
             '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="border:1px solid #e2d2a8;border-radius:8px;padding:6px 16px;background:#FBF8F3;">%s%s</table>'
             % (GOLD, rows, total_html))
     # CTA: with a live accept link, lead with Accept & Sign and suppress the
-    # onboarding/reg links so the client accepts FIRST. Otherwise (manual
-    # copy/Outlook send, no token) keep the onboarding CTA + reg links.
+    # onboarding/reg links so the client accepts FIRST (the form links then arrive
+    # on the acceptance email). Otherwise (manual copy/Outlook send, no token) keep
+    # the onboarding CTA + reg links.
     if accept_url:
         cta_html = (
             '<p style="margin:24px 0 14px;color:%s;font-size:15px;line-height:1.65;">'
