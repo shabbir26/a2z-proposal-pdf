@@ -946,7 +946,16 @@ def send():
     # matches his desktop tool exactly (warm tone, service list, all reg links).
     if d.get("attach_proposal") and d.get("proposal") and not d.get("html_override"):
         try:
-            esubject, ebody, ehtml = _email_for(d["proposal"], accept_url=d.get("accept_url"))
+            # Accept & Sign link: use an explicit accept_url if the caller sent one,
+            # otherwise lift it out of the incoming html - the "Send for signing" path
+            # already embeds the /sign?token= link in its button, so the live button
+            # works without any change to the Cloudflare sign-create function.
+            _acc = d.get("accept_url")
+            if not _acc and html:
+                _m = _re.search(r'href="([^"]*/sign\?token=[^"#]*)"', html)
+                if _m:
+                    _acc = _m.group(1)
+            esubject, ebody, ehtml = _email_for(d["proposal"], accept_url=_acc)
             subject = subject or esubject
             html = ehtml or _text_to_html(ebody)
         except Exception:
