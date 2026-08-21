@@ -260,19 +260,19 @@ def proposal():
             wb = _build_workbook_ltd(d)
             wb.save(wb_path)
             wb2 = GEN.safe_load_workbook(wb_path)
-            GEN.build_ltd(wb2, out_path, ref=d.get("ref"))
+            GEN.build_ltd(wb2, out_path, ref=d.get("ref"), acceptance=d.get("acceptance"))
         elif kind == "PARTNERSHIP":
             # partnership sheet uses the same layout under a different name
             wb = _build_workbook_ltd(d)
             wb.active.title = "Partnership Proposal"
             wb.save(wb_path)
             wb2 = GEN.safe_load_workbook(wb_path)
-            GEN.build_partnership(wb2, out_path, ref=d.get("ref"))
+            GEN.build_partnership(wb2, out_path, ref=d.get("ref"), acceptance=d.get("acceptance"))
         elif kind == "SA":
             wb = _build_workbook_sa(d)
             wb.save(wb_path)
             wb2 = GEN.safe_load_workbook(wb_path)
-            GEN.build_sa(wb2, out_path, ref=d.get("ref"))
+            GEN.build_sa(wb2, out_path, ref=d.get("ref"), acceptance=d.get("acceptance"))
         else:
             return jsonify(error="Unknown kind: %s" % kind), 400
     except Exception as e:
@@ -368,11 +368,11 @@ def _pdf_bytes_for(d):
     wb.save(wb_path)
     wb2 = GEN.safe_load_workbook(wb_path)
     if kind == "SA":
-        GEN.build_sa(wb2, out_path, ref=d.get("ref"))
+        GEN.build_sa(wb2, out_path, ref=d.get("ref"), acceptance=d.get("acceptance"))
     elif kind == "PARTNERSHIP":
-        GEN.build_partnership(wb2, out_path, ref=d.get("ref"))
+        GEN.build_partnership(wb2, out_path, ref=d.get("ref"), acceptance=d.get("acceptance"))
     else:
-        GEN.build_ltd(wb2, out_path, ref=d.get("ref"))
+        GEN.build_ltd(wb2, out_path, ref=d.get("ref"), acceptance=d.get("acceptance"))
     with open(out_path, "rb") as f:
         return f.read()
 
