@@ -1867,7 +1867,7 @@ def build_engagement(wb, out, ref=None, acceptance=None, eng=None):
     _esec(p,_n,"The fees","Your fees", reserve=58); _fee_n=_n
     p.need(31); y=p.get_y(); bh=25; p.rrect(p.X0,y,p.CW,bh,fill=NAVY,style="F")
     _afreq=str((eng or {}).get("freq") or "").strip().lower(); _annual=_afreq.startswith("annual")  # r721: fee basis from payload
-    _ecand=num((eng or {}).get("sub")) or 0; _fsub=(_ecand if _ecand>=d["sub"]*6 else round(d["sub"]*12,2)) if _annual else d["sub"]
+    _fsub=((num((eng or {}).get("sub_annual")) or round(d["sub"]*12,2)) if _annual else d["sub"])  # r722: true annual from payload, not 12x a rounded monthly
     _fvat=(round(_fsub*0.2,2) if _annual else d["vat"]); _fgross=(round(_fsub*1.2,2) if _annual else d["gross"])
     p.f("Nunito","B",7.5,A9BBD0); p.set_xy(p.X0+8,y+5.5); p.cell(0,4," ".join("YOUR PROFESSIONAL FEE"))
     p.f("Cormorant","B",16,WHITE); p.set_xy(p.X0+8,y+10.5); p.cell(0,8,"Your finance function")
@@ -1875,7 +1875,7 @@ def build_engagement(wb, out, ref=None, acceptance=None, eng=None):
     p.f("Nunito","",8,A9BBD0); p.set_xy(p.X0+86,y+17.4); p.cell(p.CW-94,4,(f"+ VAT per year  \u00b7  {gbp(_fgross)} gross" if _annual else f"+ VAT per month  \u00b7  {gbp(_fgross)} gross"),align="R")
     p.set_y(y+bh+2.5)
     total_row(p,("Annual fee (subtotal)" if _annual else "Monthly instalment (subtotal)"),_fsub); total_row(p,"VAT @ 20%",_fvat); total_row(p,("Gross annual fee" if _annual else "Gross monthly instalment"),_fgross,grand=True)
-    p.ln(0.5); _eng_para(p,("Your fee is an **annual professional fee** collected by Direct Debit annually in advance. It is one fixed fee for the year's service, not billed by the hour, and it changes only if the scope of work changes materially and is agreed with you in advance." if _annual else "Your fee is an **annual professional fee**, spread for your convenience into equal monthly instalments collected by Direct Debit in advance. It is one fixed fee for the year's service, not twelve separate monthly purchases. It changes only if the scope of work changes materially and is agreed with you in advance, and it is not billed by the hour."))
+    p.ln(0.5); _eng_para(p,("Your fee is an **annual professional fee** payable annually in advance. It is one fixed fee for the year's service, not billed by the hour, and it changes only if the scope of work changes materially and is agreed with you in advance." if _annual else "Your fee is an **annual professional fee**, spread for your convenience into equal monthly instalments collected by Direct Debit in advance. It is one fixed fee for the year's service, not twelve separate monthly purchases. It changes only if the scope of work changes materially and is agreed with you in advance, and it is not billed by the hour."))
     def _rows_from(seq, default_label="Item"):
         out=[]
         for x in (seq or []):
@@ -1947,9 +1947,9 @@ def build_engagement(wb, out, ref=None, acceptance=None, eng=None):
 
     _esec(p,_k,"Fees, cancellation & deposits","If things change")
     _eng_ticklist(p,[
-        (("**An annual fee, paid once a year.** Your recurring fee is an annual professional fee collected by Direct Debit annually in advance. Work is not performed evenly across the year - much is weighted to your year end and filing periods.") if _annual else ("**An annual fee, paid monthly.** Your recurring fee is an annual professional fee paid in monthly Direct Debit instalments. Work is not performed evenly across the year - much is weighted to your year end and filing periods.")),
+        (("**An annual fee, paid once a year.** Your recurring fee is an annual professional fee payable annually in advance. Work is not performed evenly across the year - much is weighted to your year end and filing periods.") if _annual else ("**An annual fee, paid monthly.** Your recurring fee is an annual professional fee paid in monthly Direct Debit instalments. Work is not performed evenly across the year - much is weighted to your year end and filing periods.")),
         (("**The annual fee already paid is not refunded** simply because you leave part-way through the annual cycle, and there is no automatic pro-rata refund based on time elapsed or work done.") if _annual else ("**Instalments already collected are not refunded** simply because you leave part-way through the annual cycle, and there is no automatic pro-rata refund based on months elapsed or work done in a given month.")),
-        (("**No further collection is taken** from the effective date your engagement ends, subject to any payment already in the banking or Direct Debit collection process.") if _annual else ("**Future instalments stop** from the effective date your engagement ends, subject to any payment already in the banking or Direct Debit collection process.")),
+        (("**No further amounts fall due** from the effective date your engagement ends, beyond anything already invoiced for the current year.") if _annual else ("**Future instalments stop** from the effective date your engagement ends, subject to any payment already in the banking or Direct Debit collection process.")),
         "**Work beyond fees paid.** If work already undertaken, started or committed for the year exceeds the fee paid, we may charge a reasonable final amount for it.",
         "**Outstanding invoices remain payable**, and any licences or filings we have paid for on your behalf remain chargeable.",
         "**Deposits and advances.** Once you accept this engagement and we begin onboarding, setup, capacity allocation, preliminary work or incur costs in reliance on your acceptance, any deposit or advance is non-refundable if you later change your mind or cancel. Nothing here removes rights that cannot lawfully be excluded."])
