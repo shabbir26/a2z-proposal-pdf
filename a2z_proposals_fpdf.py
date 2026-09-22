@@ -1663,7 +1663,7 @@ def _eng_form(lf):
 
 def _eng_form_from_kind(kind):
     k=(kind or "").upper()
-    return {"LTD":"ltd","CIC":"cic","CHARITY":"charity","PARTNERSHIP":"partnership","SA":"sole_trader"}.get(k,"ltd")
+    return {"LTD":"ltd","CIC":"cic","CHARITY":"charity","PARTNERSHIP":"partnership","SA":"sole_trader","INDIVIDUAL":"sole_trader","SOLE TRADER":"sole_trader","INDIVIDUAL OR SOLE TRADER":"sole_trader"}.get(k,"")  # r721: recognise individual/sole-trader kinds; default to the neutral base (never a company) so a missing/odd kind can't leak director wording
 
 def _eng_people_phrase(eng, form):
     ppl = eng.get("responsible_persons") or []
@@ -1866,13 +1866,16 @@ def build_engagement(wb, out, ref=None, acceptance=None, eng=None):
 
     _esec(p,_n,"The fees","Your fees", reserve=58); _fee_n=_n
     p.need(31); y=p.get_y(); bh=25; p.rrect(p.X0,y,p.CW,bh,fill=NAVY,style="F")
+    _afreq=str((eng or {}).get("freq") or "").strip().lower(); _annual=_afreq.startswith("annual")  # r721: fee basis from payload
+    _ecand=num((eng or {}).get("sub")) or 0; _fsub=(_ecand if _ecand>=d["sub"]*6 else round(d["sub"]*12,2)) if _annual else d["sub"]
+    _fvat=(round(_fsub*0.2,2) if _annual else d["vat"]); _fgross=(round(_fsub*1.2,2) if _annual else d["gross"])
     p.f("Nunito","B",7.5,A9BBD0); p.set_xy(p.X0+8,y+5.5); p.cell(0,4," ".join("YOUR PROFESSIONAL FEE"))
     p.f("Cormorant","B",16,WHITE); p.set_xy(p.X0+8,y+10.5); p.cell(0,8,"Your finance function")
-    p.f("Cormorant","B",27,WHITE); p.set_xy(p.X0+86,y+4), p.cell(p.CW-94,11,gbp(d["sub"]),align="R")
-    p.f("Nunito","",8,A9BBD0); p.set_xy(p.X0+86,y+17.4); p.cell(p.CW-94,4,f"+ VAT per month  \u00b7  {gbp(d['gross'])} gross",align="R")
+    p.f("Cormorant","B",27,WHITE); p.set_xy(p.X0+86,y+4), p.cell(p.CW-94,11,gbp(_fsub),align="R")
+    p.f("Nunito","",8,A9BBD0); p.set_xy(p.X0+86,y+17.4); p.cell(p.CW-94,4,(f"+ VAT per year  \u00b7  {gbp(_fgross)} gross" if _annual else f"+ VAT per month  \u00b7  {gbp(_fgross)} gross"),align="R")
     p.set_y(y+bh+2.5)
-    total_row(p,"Monthly instalment (subtotal)",d["sub"]); total_row(p,"VAT @ 20%",d["vat"]); total_row(p,"Gross monthly instalment",d["gross"],grand=True)
-    p.ln(0.5); _eng_para(p,"Your fee is an **annual professional fee**, spread for your convenience into equal monthly instalments collected by Direct Debit in advance. It is one fixed fee for the year's service, not twelve separate monthly purchases. It changes only if the scope of work changes materially and is agreed with you in advance, and it is not billed by the hour.")
+    total_row(p,("Annual fee (subtotal)" if _annual else "Monthly instalment (subtotal)"),_fsub); total_row(p,"VAT @ 20%",_fvat); total_row(p,("Gross annual fee" if _annual else "Gross monthly instalment"),_fgross,grand=True)
+    p.ln(0.5); _eng_para(p,("Your fee is an **annual professional fee** collected by Direct Debit annually in advance. It is one fixed fee for the year's service, not billed by the hour, and it changes only if the scope of work changes materially and is agreed with you in advance." if _annual else "Your fee is an **annual professional fee**, spread for your convenience into equal monthly instalments collected by Direct Debit in advance. It is one fixed fee for the year's service, not twelve separate monthly purchases. It changes only if the scope of work changes materially and is agreed with you in advance, and it is not billed by the hour."))
     def _rows_from(seq, default_label="Item"):
         out=[]
         for x in (seq or []):
@@ -1944,17 +1947,20 @@ def build_engagement(wb, out, ref=None, acceptance=None, eng=None):
 
     _esec(p,_k,"Fees, cancellation & deposits","If things change")
     _eng_ticklist(p,[
-        "**An annual fee, paid monthly.** Your recurring fee is an annual professional fee paid in monthly Direct Debit instalments. Work is not performed evenly across the year - much is weighted to your year end and filing periods.",
-        "**Instalments already collected are not refunded** simply because you leave part-way through the annual cycle, and there is no automatic pro-rata refund based on months elapsed or work done in a given month.",
-        "**Future instalments stop** from the effective date your engagement ends, subject to any payment already in the banking or Direct Debit collection process.",
-        "**Work beyond fees paid.** If work already undertaken, started or committed for the year exceeds the instalments collected, we may charge a reasonable final amount for it.",
+        (("**An annual fee, paid once a year.** Your recurring fee is an annual professional fee collected by Direct Debit annually in advance. Work is not performed evenly across the year - much is weighted to your year end and filing periods.") if _annual else ("**An annual fee, paid monthly.** Your recurring fee is an annual professional fee paid in monthly Direct Debit instalments. Work is not performed evenly across the year - much is weighted to your year end and filing periods.")),
+        (("**The annual fee already paid is not refunded** simply because you leave part-way through the annual cycle, and there is no automatic pro-rata refund based on time elapsed or work done.") if _annual else ("**Instalments already collected are not refunded** simply because you leave part-way through the annual cycle, and there is no automatic pro-rata refund based on months elapsed or work done in a given month.")),
+        (("**No further collection is taken** from the effective date your engagement ends, subject to any payment already in the banking or Direct Debit collection process.") if _annual else ("**Future instalments stop** from the effective date your engagement ends, subject to any payment already in the banking or Direct Debit collection process.")),
+        "**Work beyond fees paid.** If work already undertaken, started or committed for the year exceeds the fee paid, we may charge a reasonable final amount for it.",
         "**Outstanding invoices remain payable**, and any licences or filings we have paid for on your behalf remain chargeable.",
         "**Deposits and advances.** Once you accept this engagement and we begin onboarding, setup, capacity allocation, preliminary work or incur costs in reliance on your acceptance, any deposit or advance is non-refundable if you later change your mind or cancel. Nothing here removes rights that cannot lawfully be excluded."])
 
     _esec(p,_k+1,"Anti-money-laundering","Identity checks and our legal duties")
     _eng_para(p, "As a firm supervised by the ACCA for anti-money-laundering, we are required by the Money Laundering Regulations and the Proceeds of Crime Act 2002 to carry out identity and background checks before and during our engagement. This protects you as well as us.")
     _eng_ticklist(p,[
-        "We verify the identity of "+form["entity_the"]+" and of "+form["officer_plural"]+" and any beneficial owners, may use electronic verification, and may ask for documents. We keep these records for at least five years after the engagement ends.",
+        "We verify the identity of "+form["entity_the"]+" and of "+form["officer_plural"]+" and any beneficial owners, and may ask you for documents. We keep these records for at least five years after the engagement ends.",
+        "**Electronic verification and screening.** You consent to us verifying identities electronically and to screening "+form["entity_the"]+", "+form["officer_plural"]+" and any beneficial owners against sanctions, politically-exposed-person and adverse-media sources, both at the outset and from time to time while we act. We use third-party electronic providers for this; an electronic check is recorded with the provider but does not affect your credit rating. How those providers handle personal data is covered in the data-protection section below and in our privacy notice.",
+        "**Companies House identity verification.** Where we file at Companies House for you, the law now requires the identity of directors, people with significant control and, in some cases, members to be verified with Companies House. As a Companies House Authorised Corporate Service Provider (ACSP) we may carry out and confirm that verification - which is separate from the anti-money-laundering checks above - and you consent to us doing so and to sharing the information Companies House requires.",
+        "**Keeping your information current.** You will give us accurate identification information and tell us promptly of any change in your ownership, control, officers or people with significant control, so that our records stay up to date.",
         "We may be unable to start or to continue acting, and may have to suspend work, until we have completed checks we are satisfied with.",
         "We are required to report any knowledge or suspicion of money laundering to the National Crime Agency, and the law may prohibit us from telling you that a report has been made or the reason for it.",
         "We will not be liable for any loss arising from any action we take, or any work we are unable to do, in order to meet these legal obligations."])
@@ -1980,7 +1986,7 @@ def build_engagement(wb, out, ref=None, acceptance=None, eng=None):
         "Identification and contact details, financial and accounting records, tax information, and where relevant payroll, employee and officer details",
         "**Performance of this contract**, **legal obligation** (AML, tax, companies and charity law and our regulator's rules), and **legitimate interests** in running and securing our practice"])
     _eng_sublabel(p,"Sharing, international processing, retention and your rights")
-    _eng_para(p,"We share data only as needed to deliver your services: "+form["authorities"]+"; pension, payroll and software providers where relevant; and our own regulated delivery team, **including our offshore processing team, who work strictly under our instruction and a written data-processing agreement** with appropriate safeguards for any processing outside the UK. We never sell your data. We keep records for as long as we act for you and at least six years afterwards, then delete them securely. If a personal-data breach affects you we will act promptly and notify you and the ICO where the law requires. You may access, correct, erase, restrict, port or object to the processing of your data, and complain to the Information Commissioner's Office (ico.org.uk). To exercise any of these, or for our full privacy notice, contact us at info@a2zaccounting.co.uk.")
+    _eng_para(p,"We share data only as needed to deliver your services: "+form["authorities"]+"; pension, payroll and software providers, and identity-verification and sanctions-screening providers, where relevant; and our own regulated delivery team, **including our offshore processing team, who work strictly under our instruction and a written data-processing agreement** with appropriate safeguards for any processing outside the UK. We never sell your data. We keep records for as long as we act for you and at least six years afterwards, then delete them securely. If a personal-data breach affects you we will act promptly and notify you and the ICO where the law requires. You may access, correct, erase, restrict, port or object to the processing of your data, and complain to the Information Commissioner's Office (ico.org.uk). To exercise any of these, or for our full privacy notice, contact us at info@a2zaccounting.co.uk.")
     _eng_para(p,"You confirm you have the right to share with us any personal data you provide about other people, such as your employees or officers, and that you will help us respond to any request they make about data held for your engagement.")
     _ct="**Your consent.** By accepting this agreement you confirm you have read this section and consent to us, and our processors, handling your personal data - and, where you provide it, the personal data of your officers and employees - as described, and to us acting as your authorised agent with "+form["authorities"]+"."
     _eng_note(p, _ct)
